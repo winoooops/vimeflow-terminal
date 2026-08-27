@@ -58,6 +58,47 @@ Windows ConPTY packaging consumed by `ci.yml`, and the high-churn website,
 release, and `docs/next` sources. Those surfaces wait for fork-owned docs and
 release decisions rather than being deleted piecemeal.
 
+### Release-tag merge probe baseline
+
+The Round 2b probe merged `v0.8.2`
+(`9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c`) with
+`--no-commit --no-ff` into cleanup commit `cf7d3c5b`, then aborted the merge
+and removed the temporary worktree and branch.
+
+The expected baseline is 11 content conflicts:
+
+```text
+AGENTS.md
+Cargo.lock
+README.md
+docs/next/website/src/data/config-reference.json
+justfile
+src/app/mod.rs
+src/app/state.rs
+src/config/io.rs
+src/config/model.rs
+src/server/headless.rs
+src/ui/sidebar.rs
+```
+
+There are 117 expected `deleted in main, modified in v0.8.2` conflicts:
+
+| Registered set | Conflicts |
+| --- | ---: |
+| `.githooks/pre-commit` | 1 |
+| `.github/workflows/website.yml` | 1 |
+| `SPONSORS.md` | 1 |
+| `docs/preview/` | 49 |
+| `docs/versions/` | 61 |
+| `workers/plugin-marketplace/` | 4 |
+
+The retained, fork-modified `.github/workflows/issue-gate.yml` has one inverse
+`deleted in v0.8.2, modified in main` conflict. Four paths merge as clean
+upstream additions below registered prefixes and must then be rejected by the
+reappearance guard: `website/assets/og-blog-yc-v1.png`,
+`website/assets/where-do-agents-run-while-you-sleep.png`,
+`website/assets/yc-logo.svg`, and `workers/plugin-marketplace/bun.lock`.
+
 ## Baseline
 
 Rechecked on macOS arm64 with Rust/Cargo 1.96.1 on 2026-08-18:
@@ -142,7 +183,7 @@ the top of the file:
 | `.github/workflows/preview.yml` | Keep upstream preview publishing from running in the fork. | PR #8 |
 | `.github/workflows/label-next-release-issues.yml` | Keep upstream release-label automation from editing fork issues. | PR #8 |
 | `.github/workflows/nix.yml` | Disable the inherited GitHub Nix check in the fork after its fixed-output crate fetches repeatedly failed with crates.io HTTP 403; local `nix build` remains the packaging check. | PR #8 |
-| `justfile` | Remove task-runner entry points for retired repository hooks and the plugin-marketplace Worker while preserving fork build, lint, test, and integration-asset recipes. | PR pending |
+| `justfile` | Remove task-runner entry points for retired repository hooks and the plugin-marketplace Worker while preserving fork build, lint, test, and integration-asset recipes. | PR #9 |
 | `.gitignore` | Whitelist `docs/vimeflow/` (fork specs/plans) alongside upstream's docs whitelist entries. | `f8229b2e` |
 | `docs/next/website/src/content/docs/agents.mdx` | Document the built-in watcher, automatic agent titles, standalone-plugin migration, adaptive Agent cards, and compact-rail numbering. | `18a6a734`, P5, compact-rail numbers (this commit) |
 | `docs/next/website/src/data/config-reference.json` | Add the native agent watcher, title-sync, Agent-card, and compact-rail configuration keys to the generated user reference snapshot. | `18a6a734`, P5, compact-rail numbers (this commit) |
