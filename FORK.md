@@ -27,6 +27,37 @@ separate product branch.
 
 `origin` points to the fork and `upstream` points to `herdrdev/herdr`.
 
+## Removed paths and upstream merge policy
+
+`REMOVED_PATHS` is the machine-readable deletion registry. Each non-comment
+line is either an exact repository-relative path or a directory prefix ending
+in `/`. Fork CI compares those entries with `git ls-files`; a registered path
+must have no tracked match.
+
+- `master` remains a pristine fast-forward mirror. Registered deletions exist
+  only on product branch `main`.
+- Before each upstream release merge, fetch tags and review the upstream diff
+  for every registered exact path and prefix.
+- When upstream modifies a registered removed file, resolve the
+  modify/delete conflict in favor of deletion on `main` only after deciding
+  whether its behavior must be ported into a retained binary-essential or
+  fork-owned path. Record any port as a normal fork modification.
+- When upstream adds a file below a registered prefix, the guard fails. Delete
+  it when it belongs to the retired surface. If it creates a real binary or
+  test dependency, narrow or remove the registry entry in a dedicated
+  reviewed PR; never silently force-delete the new dependency.
+- Keep-but-exclude paths are not fork-edited. Accept the upstream side during
+  merges and keep those paths outside fork workflows, packaging, and
+  documented validation.
+- A merge that resurrects a registered path must fail fork CI before reaching
+  `main`; the guard does not inspect ignore rules or local Git configuration.
+
+The remaining issue #3 tail is intentionally retained: repository-gated
+upstream release/preview/Nix automation, `ci.yml`, Nix packaging inputs,
+Windows ConPTY packaging consumed by `ci.yml`, and the high-churn website,
+release, and `docs/next` sources. Those surfaces wait for fork-owned docs and
+release decisions rather than being deleted piecemeal.
+
 ## Baseline
 
 Rechecked on macOS arm64 with Rust/Cargo 1.96.1 on 2026-08-18:
@@ -111,6 +142,7 @@ the top of the file:
 | `.github/workflows/preview.yml` | Keep upstream preview publishing from running in the fork. | PR #8 |
 | `.github/workflows/label-next-release-issues.yml` | Keep upstream release-label automation from editing fork issues. | PR #8 |
 | `.github/workflows/nix.yml` | Disable the inherited GitHub Nix check in the fork after its fixed-output crate fetches repeatedly failed with crates.io HTTP 403; local `nix build` remains the packaging check. | PR #8 |
+| `justfile` | Remove task-runner entry points for retired repository hooks and the plugin-marketplace Worker while preserving fork build, lint, test, and integration-asset recipes. | PR pending |
 | `.gitignore` | Whitelist `docs/vimeflow/` (fork specs/plans) alongside upstream's docs whitelist entries. | `f8229b2e` |
 | `docs/next/website/src/content/docs/agents.mdx` | Document the built-in watcher, automatic agent titles, standalone-plugin migration, adaptive Agent cards, and compact-rail numbering. | `18a6a734`, P5, compact-rail numbers (this commit) |
 | `docs/next/website/src/data/config-reference.json` | Add the native agent watcher, title-sync, Agent-card, and compact-rail configuration keys to the generated user reference snapshot. | `18a6a734`, P5, compact-rail numbers (this commit) |
@@ -141,8 +173,9 @@ For each upstream release:
 2. Create `sync/vX.Y.Z` from `main` and merge the signed or verified upstream
    release tag into it with a merge commit.
 3. Compare changed upstream paths with the registry above. Resolve conflicts
-   explicitly, retain the in-file notice on every fork-modified upstream
-   source file, and update the registry and `MODIFICATIONS` in the same PR.
+   and registered deletions explicitly, retain the in-file notice on every
+   fork-modified upstream source file, and update both registries and
+   `MODIFICATIONS` in the same PR.
 4. Run the macOS/Linux build-and-test matrix and review the complete diff.
 5. Merge the sync PR into `main`; never auto-resolve conflicts or commit fork
    work directly to `master`.

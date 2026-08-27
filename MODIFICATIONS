@@ -20,6 +20,7 @@ Modified upstream files
 - Cargo.lock
 - docs/next/website/src/content/docs/agents.mdx
 - docs/next/website/src/data/config-reference.json
+- justfile
 - nix/package.nix
 - src/update.rs
 - src/cli.rs
@@ -53,6 +54,7 @@ Fork-added files
 
 - FORK.md
 - MODIFICATIONS
+- REMOVED_PATHS
 - .github/workflows/fork-ci.yml
 - scripts/preseed_zig_cache.sh
 - tests/watcher_dependency_smoke.rs
@@ -65,6 +67,12 @@ Fork-added files
 - src/agent_cards.rs
 - src/agent_cards/
 - src/title_sync/
+
+Removed upstream paths
+----------------------
+
+`REMOVED_PATHS` is the authoritative exact-path and directory-prefix registry
+for upstream files deliberately absent from the fork product branch.
 
 See FORK.md for the path-by-path upstream-edit registry, reasons, commits,
 branch model, and merge procedure. The upstream LICENSE and notices remain
