@@ -1,3 +1,4 @@
+# Modified from herdr by the vimeflow project — see FORK.md
 name: Nix
 
 on:
@@ -37,6 +38,7 @@ concurrency:
 
 jobs:
   flake-check:
+    if: github.repository == 'herdrdev/herdr' || github.repository == 'ogulcancelik/herdr'
     name: flake check
     runs-on: ubuntu-latest
     timeout-minutes: 15

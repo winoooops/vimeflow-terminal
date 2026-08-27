@@ -1,3 +1,4 @@
+# Modified from herdr by the vimeflow project — see FORK.md
 name: Issue Gate
 
 on:
@@ -9,7 +10,7 @@ permissions:
 
 jobs:
   check-template:
-    if: ${{ !github.event.issue.pull_request }}
+    if: (github.repository == 'herdrdev/herdr' || github.repository == 'ogulcancelik/herdr') && !github.event.issue.pull_request
     runs-on: ubuntu-latest
 
     steps:

@@ -1,3 +1,4 @@
+# Modified from herdr by the vimeflow project — see FORK.md
 name: Close pending-release issues
 
 on:
@@ -13,6 +14,7 @@ env:
 
 jobs:
   close:
+    if: github.repository == 'herdrdev/herdr' || github.repository == 'ogulcancelik/herdr'
     runs-on: ubuntu-latest
 
     steps:
