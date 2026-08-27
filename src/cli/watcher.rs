@@ -1,6 +1,9 @@
+#[cfg(unix)]
 const WATCHER_PLUGIN_ID: &str = "herdr-agent-watcher";
+#[cfg(unix)]
 const TITLE_SYNC_PLUGIN_ID: &str = "herdr-agent-title-sync";
 
+#[cfg(unix)]
 pub(crate) fn coexistence_warnings<'a>(
     watcher_enabled: bool,
     title_sync_enabled: bool,

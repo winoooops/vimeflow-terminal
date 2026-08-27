@@ -53,41 +53,6 @@ impl App {
         })
     }
 
-    pub(crate) fn mutate_pane_label(
-        &mut self,
-        ws_idx: usize,
-        pane_id: crate::layout::PaneId,
-        label: Option<String>,
-    ) -> Option<crate::api::schema::PaneInfo> {
-        let terminal_id = self
-            .state
-            .workspaces
-            .get(ws_idx)?
-            .terminal_id(pane_id)?
-            .clone();
-        let label = label.and_then(|label| {
-            let label = label.trim().to_string();
-            (!label.is_empty()).then_some(label)
-        });
-        let changed = {
-            let terminal = self.state.terminals.get_mut(&terminal_id)?;
-            if terminal.manual_label == label {
-                false
-            } else {
-                match label {
-                    Some(label) => terminal.set_manual_label(label),
-                    None => terminal.clear_manual_label(),
-                }
-                true
-            }
-        };
-        if changed {
-            self.state.mark_session_dirty();
-            self.emit_pane_updated(ws_idx, pane_id);
-        }
-        self.pane_info(ws_idx, pane_id)
-    }
-
     pub(crate) fn apply_title_sync_results(
         &mut self,
         panes: Vec<ResolvedPane>,
