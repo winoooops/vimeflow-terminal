@@ -1,0 +1,23 @@
+# Repository-relative exact paths or directory prefixes; prefixes end in `/`.
+.githooks/
+.github/DISCUSSION_TEMPLATE/
+.github/FUNDING.yml
+.github/dependabot.yml
+.github/workflows/build-artifacts-manual.yml
+.github/workflows/website.yml
+.pi/
+.zed/
+SPONSORS.md
+assets/logo.png
+assets/logo.svg
+assets/og-card.png
+assets/screenshot.png
+assets/sponsors/
+docs/preview/
+docs/versions/
+scripts/capture_agent_screen.py
+scripts/capture_key_matrix.py
+scripts/capture_keys.py
+scripts/verify_suspicious_keys.py
+website/assets/
+workers/plugin-marketplace/
