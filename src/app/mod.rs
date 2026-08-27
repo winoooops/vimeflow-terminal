@@ -17,6 +17,7 @@ mod creation;
 mod git_refresh;
 mod ids;
 mod input;
+mod pane_label;
 mod popup;
 mod runtime;
 mod runtime_mutations;

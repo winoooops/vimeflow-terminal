@@ -566,12 +566,16 @@ pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
     Rect::new(area.x, body_y, body_width, body_height)
 }
 
-pub(crate) fn agent_panel_items_rect(app: &AppState, area: Rect, has_scrollbar: bool) -> Rect {
-    let mut body = agent_panel_body_rect(area, has_scrollbar);
+pub(crate) fn agent_panel_items_rect(_app: &AppState, area: Rect, has_scrollbar: bool) -> Rect {
+    let body = agent_panel_body_rect(area, has_scrollbar);
     #[cfg(unix)]
-    if hidden_idle_agent_count(app) > 0 {
-        body.height = body.height.saturating_sub(1);
-    }
+    let body = {
+        let mut body = body;
+        if hidden_idle_agent_count(_app) > 0 {
+            body.height = body.height.saturating_sub(1);
+        }
+        body
+    };
     body
 }
 
@@ -625,12 +629,12 @@ fn build_agent_card(
 pub(crate) fn agent_entry_height_in_body(
     app: &AppState,
     entry: &AgentPanelEntry,
-    body_width: u16,
+    _body_width: u16,
     body_height: u16,
 ) -> u16 {
     #[cfg(unix)]
     if app.agents_view == crate::config::AgentsViewConfig::Cards {
-        return build_agent_card(app, entry, body_width, body_height)
+        return build_agent_card(app, entry, _body_width, body_height)
             .lines
             .len()
             .min(u16::MAX as usize) as u16;
