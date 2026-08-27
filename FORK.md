@@ -106,11 +106,11 @@ the top of the file:
 | `src/app/state.rs` | Track title-sync generations, live Agents-card and compact-rail presentation state, and non-blocking watcher telemetry snapshots. | `e006a1ea`, `b8a6406c`, `95a7db2a`, compact-rail numbers (this commit) |
 | `README.md` | Replace upstream's product README with fork framing: try-herdr-first redirect, the opinionated-layer scope, shipped/upcoming features, build-from-source instructions, tracking-fork model, and attribution. Upstream's sponsor block, download/stars badges, demo video, and logo are dropped; a sponsor-herdr credit line is kept. | PR #2 |
 | `AGENTS.md` | Add the fork-overrides section (branch model, fork CI, disabled upstream workflows), fork command reference, and architecture map. `CLAUDE.md` remains a symlink to it. | PR #2 |
-| `.github/workflows/issue-gate.yml` | Keep upstream issue-template enforcement from closing or editing issues in the fork. | PR pending |
-| `.github/workflows/release.yml` | Keep upstream release publishing and issue-closing jobs from running in the fork. | PR pending |
-| `.github/workflows/preview.yml` | Keep upstream preview publishing from running in the fork. | PR pending |
-| `.github/workflows/label-next-release-issues.yml` | Keep upstream release-label automation from editing fork issues. | PR pending |
-| `.github/workflows/nix.yml` | Disable the inherited GitHub Nix check in the fork after its fixed-output crate fetches repeatedly failed with crates.io HTTP 403; local `nix build` remains the packaging check. | PR pending |
+| `.github/workflows/issue-gate.yml` | Keep upstream issue-template enforcement from closing or editing issues in the fork. | PR #8 |
+| `.github/workflows/release.yml` | Keep upstream release publishing and issue-closing jobs from running in the fork. | PR #8 |
+| `.github/workflows/preview.yml` | Keep upstream preview publishing from running in the fork. | PR #8 |
+| `.github/workflows/label-next-release-issues.yml` | Keep upstream release-label automation from editing fork issues. | PR #8 |
+| `.github/workflows/nix.yml` | Disable the inherited GitHub Nix check in the fork after its fixed-output crate fetches repeatedly failed with crates.io HTTP 403; local `nix build` remains the packaging check. | PR #8 |
 | `.gitignore` | Whitelist `docs/vimeflow/` (fork specs/plans) alongside upstream's docs whitelist entries. | `f8229b2e` |
 | `docs/next/website/src/content/docs/agents.mdx` | Document the built-in watcher, automatic agent titles, standalone-plugin migration, adaptive Agent cards, and compact-rail numbering. | `18a6a734`, P5, compact-rail numbers (this commit) |
 | `docs/next/website/src/data/config-reference.json` | Add the native agent watcher, title-sync, Agent-card, and compact-rail configuration keys to the generated user reference snapshot. | `18a6a734`, P5, compact-rail numbers (this commit) |
