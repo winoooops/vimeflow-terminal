@@ -5083,6 +5083,7 @@ mod tests {
             server_event_tx,
             #[cfg(unix)]
             agent_watcher: embedded_watcher::EmbeddedWatcher::disabled(),
+            #[cfg(unix)]
             agent_telemetry: crate::agent_cards::telemetry::TelemetryIngest::disabled(),
             #[cfg(unix)]
             title_sync,

@@ -90,7 +90,7 @@ the top of the file:
 | `src/update.rs` | Prevent hosted Herdr manifest fetches, self-update installs, and background update checks in the fork. | `faf956e9b815045ca114d89b7faf9534386e0e8b` |
 | `src/cli.rs` | Reject fork-disabled update channels, dispatch the native watcher CLI, and share its coexistence diagnostics with server startup. | `dded4c73`, `b3aff323` |
 | `src/product_announcements.rs` | Ignore announcements delivered through stock Herdr update manifests while retaining local preview support and its intentionally dormant helpers. | `faf956e9b815045ca114d89b7faf9534386e0e8b`, P5 clippy gate (this commit) |
-| `src/app/mod.rs` | Align stock-manifest and legacy-row tests, register native title sync, apply live Agents-card and compact-rail settings, and initialize watcher telemetry. | `e312ccf8`, `e006a1ea`, `b8a6406c`, `95a7db2a`, P5 gate fix, compact-rail numbers (this commit) |
+| `src/app/mod.rs` | Align stock-manifest and legacy-row tests, register native title sync (+ the ungated pane_label module so Windows keeps the rename API), apply live Agents-card and compact-rail settings, and initialize watcher telemetry. | `e312ccf8`, `e006a1ea`, `b8a6406c`, `95a7db2a`, P5 gate fix, compact-rail numbers, PR #6 |
 | `src/app/actions.rs` | Trigger coalesced title recomputation and reset focused-card collapse state on pane focus changes. | `e006a1ea`, `158aabf9` |
 | `src/app/input/navigate.rs` | Keep indexed and relative Agent focus aligned with the cards-visible order. | `158aabf9` |
 | `src/app/input/mouse.rs` | Focus Agent cards and toggle the focused card from its chevron zone. | `158aabf9` |
@@ -110,12 +110,12 @@ the top of the file:
 | `src/config/io.rs` | Recognize native feature sections and diagnose legacy Agents-row settings from raw startup/live TOML. | `c3c70979`, `b8a6406c` |
 | `src/config.rs` | Export the fork's Agents-card view configuration type. | `b8a6406c` |
 | `src/config/sidebar.rs` | Add live Agents-card, idle-filter, and compact-rail number settings beside legacy row configuration. | `b8a6406c`, compact-rail numbers (this commit) |
-| `src/server/headless.rs` | Own the embedded watcher, telemetry ingestion, and title-sync lifecycles across normal and handoff server paths and warn about enabled standalone twins. | `dd08df50`, `e006a1ea`, `b3aff323`, `95a7db2a` |
+| `src/server/headless.rs` | Own the embedded watcher, telemetry ingestion, and title-sync lifecycles across normal and handoff server paths, warn about enabled standalone twins, and keep test construction cfg-clean on Windows. | `dd08df50`, `e006a1ea`, `b3aff323`, `95a7db2a`, PR #6 |
 | `src/cli/spec.rs` | Describe the native watcher command group and its supported subcommands. | `dded4c73` |
 | `src/main.rs` | Register the Unix-only native title-sync and Agent-card modules. | `f4af78b5`, `95a7db2a` |
 | `src/events.rs` | Return blocking title-reader results to the server thread for identity-checked application. | `e006a1ea` |
 | `src/ui.rs` | Export shared Agent-card geometry to sidebar input handling. | `158aabf9` |
-| `src/ui/sidebar.rs` | Delegate Agents content to adaptive cards and render the compact rail with configurable leading slots and centered dot-only rows. | `158aabf9`, `53970ca3`, P5 clippy gate, compact-rail numbers, centered rail dots (this commit) |
+| `src/ui/sidebar.rs` | Delegate Agents content to adaptive cards, render the compact rail with configurable leading slots and centered dot-only rows, and keep shared geometry cfg-clean on Windows. | `158aabf9`, `53970ca3`, P5 clippy gate, compact-rail numbers, centered rail dots, PR #6 |
 
 Non-commentable modified files must also be listed in `MODIFICATIONS` beside
 `LICENSE`.
