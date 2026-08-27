@@ -105,7 +105,7 @@ the top of the file:
 | `src/config/io.rs` | Recognize native feature sections and diagnose legacy Agents-row settings from raw startup/live TOML. | `c3c70979`, `b8a6406c` |
 | `src/config.rs` | Export the fork's Agents-card view configuration type. | `b8a6406c` |
 | `src/config/sidebar.rs` | Add live Agents-card, idle-filter, and compact-rail number settings beside legacy row configuration. | `b8a6406c`, compact-rail numbers (this commit) |
-| `src/server/headless.rs` | Own the embedded watcher, telemetry ingestion, and title-sync lifecycles across normal and handoff server paths and warn about enabled standalone twins. | `dd08df50`, `e006a1ea`, `b3aff323`, `95a7db2a` |
+| `src/server/headless.rs` | Own the embedded watcher, telemetry ingestion, and title-sync lifecycles across normal and handoff server paths, warn about enabled standalone twins, and keep test construction cfg-clean on Windows. | `dd08df50`, `e006a1ea`, `b3aff323`, `95a7db2a`, PR #6 |
 | `src/cli/spec.rs` | Describe the native watcher command group and its supported subcommands. | `dded4c73` |
 | `src/main.rs` | Register the Unix-only native title-sync and Agent-card modules. | `f4af78b5`, `95a7db2a` |
 | `src/events.rs` | Return blocking title-reader results to the server thread for identity-checked application. | `e006a1ea` |
