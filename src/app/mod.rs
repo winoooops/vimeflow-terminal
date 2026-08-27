@@ -17,6 +17,7 @@ mod creation;
 mod git_refresh;
 mod ids;
 mod input;
+mod pane_label;
 mod popup;
 mod runtime;
 mod runtime_mutations;
@@ -25,7 +26,6 @@ pub mod state;
 mod terminal_targets;
 mod terminal_titles;
 mod theme_sync;
-mod pane_label;
 #[cfg(unix)]
 mod title_sync;
 mod worktrees;
