@@ -1,7 +1,8 @@
 // Modified from herdr by the vimeflow project — see FORK.md
 
 use crate::config::{
-    Keybinds, NewTerminalCwdConfig, SoundConfig, TabBarPositionConfig, ToastConfig, ToastDelivery,
+    CompactRailLeadingConfig, Keybinds, NewTerminalCwdConfig, SoundConfig, TabBarPositionConfig,
+    ToastConfig, ToastDelivery,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::layout::{Direction, Rect};
@@ -11,6 +12,7 @@ use std::hash::{Hash, Hasher};
 use crate::detect::AgentState;
 use crate::layout::{PaneId, PaneInfo, SplitBorder};
 use crate::selection::Selection;
+use unicode_width::UnicodeWidthStr;
 
 pub(crate) type InstalledPluginRegistry =
     std::collections::HashMap<String, crate::api::schema::InstalledPluginInfo>;
@@ -1379,6 +1381,42 @@ pub enum SidebarWidthSource {
     Manual,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactRailLeading {
+    Inherit,
+    Number,
+    None,
+    Agent,
+}
+
+impl From<Option<CompactRailLeadingConfig>> for CompactRailLeading {
+    fn from(value: Option<CompactRailLeadingConfig>) -> Self {
+        match value {
+            Some(CompactRailLeadingConfig::Number) => Self::Number,
+            Some(CompactRailLeadingConfig::None) => Self::None,
+            Some(CompactRailLeadingConfig::Agent) => Self::Agent,
+            None => Self::Inherit,
+        }
+    }
+}
+
+pub(crate) fn validate_compact_rail_marks(
+    marks: &std::collections::BTreeMap<String, String>,
+) -> std::collections::HashMap<&'static str, String> {
+    marks
+        .iter()
+        .filter_map(|(slug, mark)| {
+            let agent = crate::detect::parse_canonical_agent_label(slug)?;
+            let label = crate::detect::agent_label(agent);
+            match UnicodeWidthStr::width(mark.as_str()) {
+                1 => Some((label, format!("{mark} "))),
+                2 => Some((label, mark.clone())),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PaneFocusTarget {
     pub workspace_id: String,
@@ -1481,6 +1519,8 @@ pub struct AppState {
     pub agents_view: crate::config::AgentsViewConfig,
     pub agents_hide_idle: bool,
     pub compact_rail_numbers: bool,
+    pub compact_rail_leading: CompactRailLeading,
+    pub compact_rail_marks: std::collections::HashMap<&'static str, String>,
     /// The focused card explicitly toggled closed; a different focused pane
     /// expands automatically without a focus-change hook.
     pub agent_card_collapsed_for: Option<PaneId>,
@@ -1868,6 +1908,8 @@ impl AppState {
             agents_view: crate::config::AgentsViewConfig::Cards,
             agents_hide_idle: false,
             compact_rail_numbers: true,
+            compact_rail_leading: CompactRailLeading::Inherit,
+            compact_rail_marks: std::collections::HashMap::new(),
             agent_card_collapsed_for: None,
             #[cfg(unix)]
             agent_telemetry: std::collections::HashMap::new(),
@@ -2294,6 +2336,46 @@ impl AppState {
 mod tests {
     use super::*;
     use crossterm::event::KeyEvent;
+
+    #[test]
+    fn compact_rail_mark_width_one_is_padded() {
+        let marks = validate_compact_rail_marks(&std::collections::BTreeMap::from([(
+            "claude".into(),
+            "C".into(),
+        )]));
+
+        assert_eq!(marks.get("claude").map(String::as_str), Some("C "));
+    }
+
+    #[test]
+    fn compact_rail_marks_drop_invalid_widths() {
+        let marks = validate_compact_rail_marks(&std::collections::BTreeMap::from([
+            ("claude".into(), String::new()),
+            ("codex".into(), "CXZ".into()),
+        ]));
+
+        assert!(marks.is_empty());
+    }
+
+    #[test]
+    fn compact_rail_marks_drop_unknown_slugs() {
+        let marks = validate_compact_rail_marks(&std::collections::BTreeMap::from([(
+            "unknown".into(),
+            "??".into(),
+        )]));
+
+        assert!(marks.is_empty());
+    }
+
+    #[test]
+    fn compact_rail_mark_width_two_passes_through() {
+        let marks = validate_compact_rail_marks(&std::collections::BTreeMap::from([(
+            "codex".into(),
+            "界".into(),
+        )]));
+
+        assert_eq!(marks.get("codex").map(String::as_str), Some("界"));
+    }
 
     #[test]
     fn agent_terminal_keeps_final_child_cursor_exposed() {

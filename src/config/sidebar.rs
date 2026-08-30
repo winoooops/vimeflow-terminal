@@ -433,12 +433,22 @@ impl Default for SpacesSidebarConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompactRailLeadingConfig {
+    Number,
+    None,
+    Agent,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
     pub agents_view: AgentsViewConfig,
     pub agents_hide_idle: bool,
     pub compact_rail_numbers: bool,
+    pub compact_rail_leading: Option<CompactRailLeadingConfig>,
+    pub compact_rail_marks: BTreeMap<String, String>,
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
 }
@@ -449,6 +459,8 @@ impl Default for SidebarConfig {
             agents_view: AgentsViewConfig::default(),
             agents_hide_idle: false,
             compact_rail_numbers: true,
+            compact_rail_leading: None,
+            compact_rail_marks: BTreeMap::new(),
             agents: AgentsSidebarConfig::default(),
             spaces: SpacesSidebarConfig::default(),
         }
@@ -465,6 +477,8 @@ mod tests {
         assert_eq!(config.agents_view, AgentsViewConfig::Cards);
         assert!(!config.agents_hide_idle);
         assert!(config.compact_rail_numbers);
+        assert_eq!(config.compact_rail_leading, None);
+        assert!(config.compact_rail_marks.is_empty());
         assert_eq!(
             config.agents.rows,
             vec![
@@ -502,11 +516,36 @@ compact_rail_numbers = false
         assert_eq!(config.ui.sidebar.agents_view, AgentsViewConfig::Legacy);
         assert!(config.ui.sidebar.agents_hide_idle);
         assert!(!config.ui.sidebar.compact_rail_numbers);
+        assert_eq!(config.ui.sidebar.compact_rail_leading, None);
+        assert!(config.ui.sidebar.compact_rail_marks.is_empty());
 
         assert!(
             toml::from_str::<crate::config::Config>("[ui.sidebar]\nagents_view = \"grid\"\n")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn compact_rail_agent_settings_parse() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar]
+compact_rail_leading = "agent"
+
+[ui.sidebar.compact_rail_marks]
+claude = "Cl"
+codex = "CX"
+"#,
+        )
+        .expect("valid compact rail agent settings");
+
+        assert_eq!(
+            config.ui.sidebar.compact_rail_leading,
+            Some(CompactRailLeadingConfig::Agent)
+        );
+        assert_eq!(config.ui.sidebar.compact_rail_marks.len(), 2);
+        assert_eq!(config.ui.sidebar.compact_rail_marks["claude"], "Cl");
+        assert_eq!(config.ui.sidebar.compact_rail_marks["codex"], "CX");
     }
 
     #[test]

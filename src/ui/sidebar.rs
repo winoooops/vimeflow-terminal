@@ -13,7 +13,7 @@ use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
 use super::status::{state_dot, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
-use crate::app::state::{AgentPanelSort, Palette};
+use crate::app::state::{AgentPanelSort, CompactRailLeading, Palette};
 use crate::app::{AppState, Mode};
 use crate::detect::AgentState;
 use crate::terminal::TerminalRuntimeRegistry;
@@ -836,13 +836,44 @@ pub(crate) fn collapsed_sidebar_sections(area: Rect) -> (Rect, Option<u16>, Rect
     (ws_area, Some(divider_y), detail_area)
 }
 
-// A future agent-letter glyph belongs in this leading-slot variant.
+fn compact_rail_agent_mark(agent: crate::detect::Agent) -> &'static str {
+    use crate::detect::Agent;
+
+    match agent {
+        Agent::Pi => "Pi",
+        Agent::Claude => "Cl",
+        Agent::Codex => "Cx",
+        Agent::Gemini => "Ge",
+        Agent::Cursor => "Cu",
+        Agent::Devin => "De",
+        Agent::Antigravity => "Ag",
+        Agent::Cline => "Cn",
+        Agent::Omp => "Om",
+        Agent::Mastracode => "Ms",
+        Agent::OpenCode => "Oc",
+        Agent::GithubCopilot => "Gh",
+        Agent::Kimi => "Ki",
+        Agent::Kiro => "Kr",
+        Agent::Droid => "Dr",
+        Agent::Amp => "Am",
+        Agent::Grok => "Gr",
+        Agent::Hermes => "He",
+        Agent::Kilo => "Kl",
+        Agent::Qodercli => "Qo",
+        Agent::Maki => "Ma",
+    }
+}
+
 enum RailLeading {
     Number {
         value: usize,
         field_width: usize,
         style: Style,
         gap_style: Option<Style>,
+    },
+    Glyph {
+        text: String,
+        style: Style,
     },
     None,
 }
@@ -871,6 +902,15 @@ fn render_compact_rail_row(
             }
             spans.push(Span::styled(dot.to_owned(), dot_style));
             frame.render_widget(Paragraph::new(Line::from(spans)), area);
+        }
+        RailLeading::Glyph { text, style } => {
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(text, style),
+                    Span::styled(dot.to_owned(), dot_style),
+                ])),
+                area,
+            );
         }
         RailLeading::None => {
             let dot_x = area.x + area.width.saturating_sub(1) / 2;
@@ -987,15 +1027,30 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             let position = detail_idx + 1;
             let position_style = Style::default().fg(p.overlay0);
             let (icon, icon_style) = state_dot(detail.state, detail.seen, p);
-            let leading = if app.compact_rail_numbers {
-                RailLeading::Number {
-                    value: position,
-                    field_width: 2,
-                    style: position_style,
-                    gap_style: None,
+            let leading = match (app.compact_rail_leading, app.compact_rail_numbers) {
+                (CompactRailLeading::Number, _) | (CompactRailLeading::Inherit, true) => {
+                    RailLeading::Number {
+                        value: position,
+                        field_width: 2,
+                        style: position_style,
+                        gap_style: None,
+                    }
                 }
-            } else {
-                RailLeading::None
+                (CompactRailLeading::Agent, _) => RailLeading::Glyph {
+                    text: detail.agent.map_or_else(
+                        || "  ".to_string(),
+                        |agent| {
+                            app.compact_rail_marks
+                                .get(crate::detect::agent_label(agent))
+                                .cloned()
+                                .unwrap_or_else(|| compact_rail_agent_mark(agent).to_string())
+                        },
+                    ),
+                    style: position_style,
+                },
+                (CompactRailLeading::None, _) | (CompactRailLeading::Inherit, false) => {
+                    RailLeading::None
+                }
             };
             render_compact_rail_row(
                 frame,
@@ -1812,6 +1867,49 @@ mod tests {
             })
     }
 
+    fn compact_rail_test_app(agent: Option<Agent>) -> crate::app::state::AppState {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.ensure_test_terminals();
+        let pane = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+        if let Some(agent) = agent {
+            terminal.detected_agent = Some(agent);
+        } else {
+            terminal.set_agent_name("custom".into());
+        }
+        app
+    }
+
+    fn collapsed_sidebar_buffer(
+        app: &crate::app::state::AppState,
+        area: Rect,
+    ) -> ratatui::buffer::Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_sidebar_collapsed(app, frame, area))
+            .expect("collapsed sidebar should render");
+        terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn compact_rail_agent_marks_are_unique_and_two_cells_wide() {
+        let marks = Agent::ALL.map(compact_rail_agent_mark);
+
+        assert!(marks.iter().all(|mark| display_width(mark) == 2));
+        assert_eq!(
+            marks
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            Agent::ALL.len()
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn cards_render_lifecycle_only_with_hidden_count_outside_entries() {
@@ -2431,6 +2529,77 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             .collect();
 
         assert_eq!(labels, ["four", "two", "one", "three"]);
+    }
+
+    #[test]
+    fn collapsed_sidebar_agent_leading_renders_mark_and_dot() {
+        let mut app = compact_rail_test_app(Some(Agent::Claude));
+        app.compact_rail_leading = CompactRailLeading::Agent;
+        let area = Rect::new(0, 0, crate::ui::COLLAPSED_WIDTH, 12);
+        let (_, _, detail_area) = collapsed_sidebar_sections(area);
+
+        let buffer = collapsed_sidebar_buffer(&app, area);
+
+        assert_eq!(buffer[(detail_area.x, detail_area.y)].symbol(), "C");
+        assert_eq!(buffer[(detail_area.x + 1, detail_area.y)].symbol(), "l");
+        assert_eq!(buffer[(detail_area.x + 2, detail_area.y)].symbol(), "·");
+        assert_eq!(buffer[(detail_area.x + 3, detail_area.y)].symbol(), "│");
+        assert_eq!(
+            buffer[(detail_area.x, detail_area.y)].style().fg,
+            Some(app.palette.overlay0)
+        );
+    }
+
+    #[test]
+    fn collapsed_sidebar_agent_leading_aligns_no_agent_dot() {
+        let mut app = compact_rail_test_app(None);
+        app.compact_rail_leading = CompactRailLeading::Agent;
+        let area = Rect::new(0, 0, crate::ui::COLLAPSED_WIDTH, 12);
+        let (_, _, detail_area) = collapsed_sidebar_sections(area);
+
+        let buffer = collapsed_sidebar_buffer(&app, area);
+
+        assert_eq!(buffer[(detail_area.x, detail_area.y)].symbol(), " ");
+        assert_eq!(buffer[(detail_area.x + 1, detail_area.y)].symbol(), " ");
+        assert_eq!(buffer[(detail_area.x + 2, detail_area.y)].symbol(), "·");
+    }
+
+    #[test]
+    fn collapsed_sidebar_agent_leading_keeps_workspace_row_unchanged() {
+        let mut app = compact_rail_test_app(Some(Agent::Claude));
+        let area = Rect::new(0, 0, crate::ui::COLLAPSED_WIDTH, 12);
+        let (workspace_area, _, _) = collapsed_sidebar_sections(area);
+        let baseline = collapsed_sidebar_buffer(&app, area);
+
+        app.compact_rail_leading = CompactRailLeading::Agent;
+        let with_agent_leading = collapsed_sidebar_buffer(&app, area);
+
+        for x in workspace_area.x..workspace_area.x + area.width {
+            assert_eq!(
+                baseline[(x, workspace_area.y)],
+                with_agent_leading[(x, workspace_area.y)]
+            );
+        }
+    }
+
+    #[test]
+    fn collapsed_sidebar_inherit_matches_existing_number_modes() {
+        let mut app = compact_rail_test_app(Some(Agent::Claude));
+        let area = Rect::new(0, 0, crate::ui::COLLAPSED_WIDTH, 12);
+
+        for (numbers, explicit) in [
+            (true, CompactRailLeading::Number),
+            (false, CompactRailLeading::None),
+        ] {
+            app.compact_rail_numbers = numbers;
+            app.compact_rail_leading = explicit;
+            let expected = collapsed_sidebar_buffer(&app, area);
+
+            app.compact_rail_leading = CompactRailLeading::Inherit;
+            let inherited = collapsed_sidebar_buffer(&app, area);
+
+            assert_eq!(inherited, expected, "compact_rail_numbers={numbers}");
+        }
     }
 
     #[test]

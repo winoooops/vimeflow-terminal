@@ -623,6 +623,10 @@ impl App {
             agents_view: config.ui.sidebar.agents_view,
             agents_hide_idle: config.ui.sidebar.agents_hide_idle,
             compact_rail_numbers: config.ui.sidebar.compact_rail_numbers,
+            compact_rail_leading: config.ui.sidebar.compact_rail_leading.into(),
+            compact_rail_marks: state::validate_compact_rail_marks(
+                &config.ui.sidebar.compact_rail_marks,
+            ),
             agent_card_collapsed_for: None,
             #[cfg(unix)]
             agent_telemetry: std::collections::HashMap::new(),
@@ -1461,6 +1465,9 @@ impl App {
                 self.state.agents_view = config.ui.sidebar.agents_view;
                 self.state.agents_hide_idle = config.ui.sidebar.agents_hide_idle;
                 self.state.compact_rail_numbers = config.ui.sidebar.compact_rail_numbers;
+                self.state.compact_rail_leading = config.ui.sidebar.compact_rail_leading.into();
+                self.state.compact_rail_marks =
+                    state::validate_compact_rail_marks(&config.ui.sidebar.compact_rail_marks);
                 if previous_agents_view != self.state.agents_view {
                     self.state.agent_card_collapsed_for = None;
                 }
@@ -3116,18 +3123,48 @@ mod tests {
     }
 
     #[test]
-    fn live_compact_rail_numbers_flip_both_ways() {
+    fn live_compact_rail_settings_flip_both_ways() {
         let mut app = test_app();
         let mut config = Config::default();
         assert!(app.state.compact_rail_numbers);
+        assert_eq!(
+            app.state.compact_rail_leading,
+            state::CompactRailLeading::Inherit
+        );
+        assert!(app.state.compact_rail_marks.is_empty());
 
         config.ui.sidebar.compact_rail_numbers = false;
+        config.ui.sidebar.compact_rail_leading =
+            Some(crate::config::CompactRailLeadingConfig::Agent);
+        config
+            .ui
+            .sidebar
+            .compact_rail_marks
+            .insert("claude".into(), "C".into());
         app.apply_live_config(&config, &[], &[], false);
         assert!(!app.state.compact_rail_numbers);
+        assert_eq!(
+            app.state.compact_rail_leading,
+            state::CompactRailLeading::Agent
+        );
+        assert_eq!(
+            app.state
+                .compact_rail_marks
+                .get("claude")
+                .map(String::as_str),
+            Some("C ")
+        );
 
         config.ui.sidebar.compact_rail_numbers = true;
+        config.ui.sidebar.compact_rail_leading = None;
+        config.ui.sidebar.compact_rail_marks.clear();
         app.apply_live_config(&config, &[], &[], false);
         assert!(app.state.compact_rail_numbers);
+        assert_eq!(
+            app.state.compact_rail_leading,
+            state::CompactRailLeading::Inherit
+        );
+        assert!(app.state.compact_rail_marks.is_empty());
     }
 
     #[test]

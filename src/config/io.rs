@@ -2,6 +2,7 @@
 use std::path::{Path, PathBuf};
 
 use tracing::warn;
+use unicode_width::UnicodeWidthStr;
 
 use super::{model::LoadedConfig, Config, CONFIG_PATH_ENV_VAR};
 
@@ -141,6 +142,7 @@ impl Config {
                 diagnostics.extend(config.collect_diagnostics());
                 if let Ok(value) = content.parse::<toml::Value>() {
                     diagnostics.extend(agent_rows_config_diagnostic(&value, &config));
+                    diagnostics.extend(compact_rail_marks_config_diagnostics(&value));
                 }
                 LoadedConfig {
                     config,
@@ -365,6 +367,7 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
 
     if !invalid_sections.iter().any(|section| section == "ui") {
         diagnostics.extend(agent_rows_config_diagnostic(&value, &config));
+        diagnostics.extend(compact_rail_marks_config_diagnostics(&value));
     }
 
     Ok(LoadedConfig {
@@ -386,6 +389,35 @@ fn agent_rows_config_diagnostic(value: &toml::Value, config: &Config) -> Option<
             "ui.sidebar.agents row settings are ignored while ui.sidebar.agents_view = \"cards\""
                 .to_string()
         })
+}
+
+fn compact_rail_marks_config_diagnostics(value: &toml::Value) -> Vec<String> {
+    let Some(marks) = value
+        .get("ui")
+        .and_then(|ui| ui.get("sidebar"))
+        .and_then(|sidebar| sidebar.get("compact_rail_marks"))
+        .and_then(toml::Value::as_table)
+    else {
+        return Vec::new();
+    };
+
+    marks
+        .iter()
+        .filter_map(|(slug, value)| {
+            if crate::detect::parse_canonical_agent_label(slug).is_none() {
+                return Some(format!(
+                    "ui.sidebar.compact_rail_marks.{slug} has an unknown canonical agent slug; entry is ignored and the built-in mark stays in effect"
+                ));
+            }
+            let mark = value.as_str()?;
+            let width = UnicodeWidthStr::width(mark);
+            (!matches!(width, 1 | 2)).then(|| {
+                format!(
+                    "ui.sidebar.compact_rail_marks.{slug} has display width {width}, expected 1 or 2; entry is ignored and the built-in mark stays in effect"
+                )
+            })
+        })
+        .collect()
 }
 
 fn unknown_top_level_sections_from_str(content: &str) -> (Vec<String>, Vec<String>) {
@@ -991,6 +1023,56 @@ interval_mss = 250
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.contains("row settings are ignored")));
+        std::env::remove_var(CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn compact_rail_marks_report_invalid_entries_only() {
+        let cases = [
+            (
+                "[ui.sidebar.compact_rail_marks]\nclaude-code = \"CC\"\n",
+                Some(
+                    "ui.sidebar.compact_rail_marks.claude-code has an unknown canonical agent slug; entry is ignored and the built-in mark stays in effect",
+                ),
+            ),
+            (
+                "[ui.sidebar.compact_rail_marks]\nclaude = \"ABC\"\n",
+                Some(
+                    "ui.sidebar.compact_rail_marks.claude has display width 3, expected 1 or 2; entry is ignored and the built-in mark stays in effect",
+                ),
+            ),
+            (
+                "[ui.sidebar.compact_rail_marks]\ncodex = \"CX\"\n",
+                None,
+            ),
+        ];
+
+        for (raw, expected) in cases {
+            let loaded = load_live_config_from_str(raw).expect("valid live config");
+            assert_eq!(
+                loaded.diagnostics,
+                expected.into_iter().map(str::to_string).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn startup_loader_also_reports_invalid_compact_rail_marks() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-config-compact-rail-marks-{}.toml",
+            std::process::id()
+        ));
+        std::fs::write(&path, "[ui.sidebar.compact_rail_marks]\nclaude = \"ABC\"\n").unwrap();
+        std::env::set_var(CONFIG_PATH_ENV_VAR, &path);
+
+        let loaded = Config::load();
+
+        assert_eq!(
+            loaded.diagnostics,
+            vec!["ui.sidebar.compact_rail_marks.claude has display width 3, expected 1 or 2; entry is ignored and the built-in mark stays in effect"]
+        );
         std::env::remove_var(CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_file(path);
     }
