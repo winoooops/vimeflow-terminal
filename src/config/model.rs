@@ -814,6 +814,47 @@ pub enum TabBarPositionConfig {
     Bottom,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TabBarStyleConfig {
+    #[default]
+    Island,
+    Classic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandPositionConfig {
+    #[default]
+    Center,
+    Left,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandDisplayConfig {
+    #[default]
+    Dots,
+    Numbers,
+    Labels,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandCapsConfig {
+    #[default]
+    Round,
+    Square,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct IslandConfig {
+    pub position: IslandPositionConfig,
+    pub display: IslandDisplayConfig,
+    pub caps: IslandCapsConfig,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -858,6 +899,10 @@ pub struct UiConfig {
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
     pub tab_bar_position: TabBarPositionConfig,
+    /// Desktop tab row presentation. Default: island.
+    pub tab_bar_style: TabBarStyleConfig,
+    /// Tab island presentation settings.
+    pub island: IslandConfig,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
     /// Expanded sidebar row composition.
@@ -1062,6 +1107,8 @@ impl Default for UiConfig {
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
+            tab_bar_style: TabBarStyleConfig::Island,
+            island: IslandConfig::default(),
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),
@@ -1343,6 +1390,67 @@ tab_bar_position = "bottom"
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
+    }
+
+    #[test]
+    fn island_config_defaults_when_absent() {
+        let config: Config = toml::from_str("").unwrap();
+
+        assert_eq!(config.ui.tab_bar_style, TabBarStyleConfig::Island);
+        assert_eq!(config.ui.island.position, IslandPositionConfig::Center);
+        assert_eq!(config.ui.island.display, IslandDisplayConfig::Dots);
+        assert_eq!(config.ui.island.caps, IslandCapsConfig::Round);
+    }
+
+    #[test]
+    fn tab_bar_style_parses_classic() {
+        let config: Config = toml::from_str(
+            r#"
+[ui]
+tab_bar_style = "classic"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.ui.tab_bar_style, TabBarStyleConfig::Classic);
+    }
+
+    #[test]
+    fn island_config_parses_position_and_display() {
+        let config: Config = toml::from_str(
+            r#"
+[ui.island]
+position = "left"
+display = "labels"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.ui.island.position, IslandPositionConfig::Left);
+        assert_eq!(config.ui.island.display, IslandDisplayConfig::Labels);
+    }
+
+    #[test]
+    fn island_caps_parses_square() {
+        let config: Config = toml::from_str(
+            r#"
+[ui.island]
+caps = "square"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.ui.island.caps, IslandCapsConfig::Square);
+    }
+
+    #[test]
+    fn tab_bar_style_rejects_unknown_value() {
+        let toml = r#"
+[ui]
+tab_bar_style = "unknown"
+"#;
+
+        assert!(toml::from_str::<Config>(toml).is_err());
     }
 
     #[test]

@@ -1,3 +1,5 @@
+<!-- Modified from herdr by the vimeflow project — see FORK.md -->
+
 ---
 title: Configuration
 description: Configure Herdr keybindings, themes, sidebar behavior, notifications, and advanced options.
@@ -257,6 +259,12 @@ Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `rese
 The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings.
 
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
+
+### Tab island
+
+The desktop tab row uses a compact tab island by default. `ui.tab_bar_style` defaults to `"island"`; set it to `"classic"` to restore the upstream tab bar. `ui.island.position` defaults to `"center"` and also accepts `"left"`. `ui.island.display` defaults to `"dots"` and also accepts `"numbers"` or `"labels"`.
+
+Labels mode truncates the active tab label to 16 terminal cells. `ui.island.caps` defaults to `"round"`; Ghostty, Kitty, and WezTerm render the caps natively, while `"square"` restores the flat fallback. All four settings reload live.
 
 ### Sidebar row layouts
 

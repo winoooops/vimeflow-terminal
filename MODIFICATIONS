@@ -19,6 +19,7 @@ Modified upstream files
 - Cargo.toml
 - Cargo.lock
 - docs/next/website/src/content/docs/agents.mdx
+- docs/next/website/src/content/docs/configuration.mdx
 - docs/next/website/src/data/config-reference.json
 - justfile
 - nix/package.nix
@@ -32,6 +33,7 @@ Modified upstream files
 - src/app/input/navigate.rs
 - src/app/input/sidebar.rs
 - src/app/api/panes.rs
+- src/app/api/tabs.rs
 - src/app/state.rs
 - src/api/schema/tests.rs
 - src/config/model.rs
@@ -43,6 +45,8 @@ Modified upstream files
 - src/server/headless.rs
 - src/ui.rs
 - src/ui/sidebar.rs
+- src/ui/tab_surface.rs
+- src/ui/tabs.rs
 
 Each modified commentable source or workflow file contains the Apache-2.0
 section 4(b) notice:
@@ -66,6 +70,7 @@ Fork-added files
 - src/server/headless/embedded_watcher.rs
 - src/agent_cards.rs
 - src/agent_cards/
+- src/ui/island.rs
 - src/title_sync/
 
 Removed upstream paths

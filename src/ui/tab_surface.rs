@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use ratatui::{layout::Rect, Frame};
 
 use super::panes::{compute_pane_infos, render_panes, resize_tab_panes};
@@ -300,8 +302,50 @@ mod tests {
         assert_eq!(app.view.terminal_area, Rect::new(26, 1, 80, 19));
         assert_eq!(app.view.pane_infos.len(), 2);
         assert!(!app.view.split_borders.is_empty());
+        assert!(app.view.tab_hit_areas.is_empty());
+        assert_eq!(
+            app.view.island_marker_hit_areas,
+            vec![Rect::new(62, 0, 3, 1), Rect::new(67, 0, 1, 1)]
+        );
+        assert_eq!(app.view.new_tab_hit_area, Rect::new(68, 0, 3, 1));
         assert!(frame.cursor.is_some());
         assert_eq!(frame.hyperlinks, vec![uri.to_owned()]);
+
+        let island_cells = &frame.cells[59..73];
+        assert_eq!(
+            island_cells
+                .iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>(),
+            "\u{e0b6} \u{e0b6} ━ \u{e0b4} ● +  \u{e0b4}"
+        );
+        assert_eq!(
+            island_cells[0].fg,
+            crate::protocol::color_to_u32(app.palette.surface0)
+        );
+        assert_eq!(
+            island_cells[0].bg,
+            crate::protocol::color_to_u32(app.palette.panel_bg)
+        );
+        assert!(island_cells[3..6]
+            .iter()
+            .all(|cell| cell.bg == crate::protocol::color_to_u32(app.palette.accent)));
+        assert_eq!(
+            island_cells[8].fg,
+            crate::protocol::color_to_u32(app.palette.overlay0)
+        );
+        assert_eq!(
+            island_cells[10].fg,
+            crate::protocol::color_to_u32(app.palette.overlay1)
+        );
+    }
+
+    #[tokio::test]
+    async fn desktop_classic_full_app_semantic_frame_is_characterized() {
+        let mut app = full_app_characterization_state("https://example.com/full-app");
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
+        let frame = full_app_frame(&mut app, Rect::new(0, 0, 106, 20));
+
         assert_eq!(
             frame_digest(&frame),
             "ce383feeaac30922502b7c4f8af53b5ca30e816ec4503ca6d015738b584da487"

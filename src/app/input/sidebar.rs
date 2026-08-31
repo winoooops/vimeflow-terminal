@@ -1408,6 +1408,7 @@ mod tests {
     #[test]
     fn clicking_tab_scroll_button_reveals_hidden_tabs_without_renaming() {
         let mut app = app_for_mouse_test();
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("test");
         ws.test_add_tab(Some("logs"));
         ws.test_add_tab(Some("review"));
@@ -1441,6 +1442,7 @@ mod tests {
     #[test]
     fn clicking_last_visible_tab_at_right_edge_does_not_overscroll() {
         let mut app = app_for_mouse_test();
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("test");
         for name in [
             "one", "two", "three", "four", "five", "six", "seven", "eight",
@@ -1485,6 +1487,7 @@ mod tests {
         app.state.workspaces = vec![ws];
         app.state.active = Some(0);
         app.state.selected = 0;
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
 
         let source = app.state.view.tab_hit_areas[0];

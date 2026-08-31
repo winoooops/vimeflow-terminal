@@ -750,6 +750,47 @@
           ]
         },
         {
+          "key": "ui.tab_bar_style",
+          "type": "\"island\" | \"classic\"",
+          "default": "\"island\"",
+          "description": "Use the tab island, or set \"classic\" as an escape hatch to restore the upstream tab bar. Reloads live.",
+          "values": [
+            "island",
+            "classic"
+          ]
+        },
+        {
+          "key": "ui.island.position",
+          "type": "\"center\" | \"left\"",
+          "default": "\"center\"",
+          "description": "Center the tab island in the tab row or align it to the left. Reloads live.",
+          "values": [
+            "center",
+            "left"
+          ]
+        },
+        {
+          "key": "ui.island.display",
+          "type": "\"dots\" | \"numbers\" | \"labels\"",
+          "default": "\"dots\"",
+          "description": "Show tabs as dots, numbers, or labels in the tab island. Reloads live.",
+          "values": [
+            "dots",
+            "numbers",
+            "labels"
+          ]
+        },
+        {
+          "key": "ui.island.caps",
+          "type": "\"round\" | \"square\"",
+          "default": "\"round\"",
+          "description": "Use rounded Powerline end caps or the flat square fallback. Reloads live.",
+          "values": [
+            "round",
+            "square"
+          ]
+        },
+        {
           "key": "ui.agent_panel_sort",
           "type": "enum",
           "default": "\"spaces\"",

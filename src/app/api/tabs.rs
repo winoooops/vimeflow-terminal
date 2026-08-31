@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use std::path::PathBuf;
 
 use crate::api::schema::{
@@ -429,6 +431,7 @@ mod tests {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let workspace = Workspace::test_new("tabs");
         app.state.workspaces = vec![workspace];
         app.state.active = Some(0);

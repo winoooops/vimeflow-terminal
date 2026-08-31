@@ -1276,6 +1276,7 @@ impl AppState {
             .tab_hit_areas
             .iter()
             .enumerate()
+            .chain(self.view.island_marker_hit_areas.iter().enumerate())
             .find_map(|(idx, area)| {
                 (area.width > 0
                     && row >= area.y
@@ -3429,7 +3430,7 @@ mod tests {
         app.state.tab_bar_position = crate::config::TabBarPositionConfig::Bottom;
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
-        let second_tab = app.state.view.tab_hit_areas[1];
+        let second_tab = app.state.view.island_marker_hit_areas[1];
         let new_tab = app.state.view.new_tab_hit_area;
 
         app.handle_mouse(mouse(
@@ -3475,24 +3476,57 @@ mod tests {
     }
 
     #[test]
-    fn right_click_inactive_tab_opens_menu_without_switching_tabs() {
+    fn left_click_island_marker_focuses_tab_and_keeps_terminal_focus() {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("one");
-        ws.test_add_tab(Some("two"));
+        let second_tab_idx = ws.test_add_tab(Some("two"));
+        let second_pane = ws.tabs[second_tab_idx].root_pane;
         app.state.workspaces = vec![ws];
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
-        let second_tab = app.state.view.tab_hit_areas[1];
+        let second_tab = app.state.view.island_marker_hit_areas[second_tab_idx];
 
         app.handle_mouse(mouse(
-            MouseEventKind::Down(MouseButton::Right),
-            second_tab.x + 1,
+            MouseEventKind::Down(MouseButton::Left),
+            second_tab.x,
+            second_tab.y,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            second_tab.x,
             second_tab.y,
         ));
 
+        assert_eq!(app.state.active, Some(0));
+        assert_eq!(app.state.workspaces[0].active_tab, second_tab_idx);
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(second_pane));
+        assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn right_click_inactive_tab_opens_menu_without_switching_tabs() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("one");
+        ws.test_add_tab(Some("two"));
+        app.state.workspaces = vec![ws, Workspace::test_new("other")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let second_tab = app.state.view.island_marker_hit_areas[1];
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            second_tab.x,
+            second_tab.y,
+        ));
+
+        assert_eq!(app.state.active, Some(0));
+        assert_eq!(app.state.selected, 0);
         assert_eq!(app.state.workspaces[0].active_tab, 0);
         let menu = app.state.context_menu.as_ref().expect("tab context menu");
         assert_eq!(
@@ -3506,6 +3540,54 @@ mod tests {
     }
 
     #[test]
+    fn island_capsule_non_marker_cells_do_nothing() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("one");
+        for _ in 1..11 {
+            ws.test_add_tab(None);
+        }
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.island.position = crate::config::IslandPositionConfig::Left;
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let tab_bar = app.state.view.tab_bar_rect;
+        let first_marker = app
+            .state
+            .view
+            .island_marker_hit_areas
+            .iter()
+            .find(|rect| rect.width > 0)
+            .copied()
+            .expect("visible island marker");
+        let points = [
+            ("capsule cap", tab_bar.x),
+            ("padding", tab_bar.x + 1),
+            ("indicator", tab_bar.x + 2),
+            ("pill cap", first_marker.x + first_marker.width),
+            ("gap", first_marker.x + first_marker.width + 1),
+        ];
+
+        for (label, col) in points {
+            assert_eq!(app.state.tab_at(col, tab_bar.y), None, "{label}");
+            assert!(!app.state.on_new_tab_button(col, tab_bar.y), "{label}");
+            app.handle_mouse(mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                col,
+                tab_bar.y,
+            ));
+            app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, tab_bar.y));
+            assert_eq!(app.state.active, Some(0), "{label}");
+            assert_eq!(app.state.workspaces[0].active_tab, 0, "{label}");
+            assert!(app.state.context_menu.is_none(), "{label}");
+            assert!(!app.state.request_new_tab, "{label}");
+            assert!(app.state.tab_press.is_none(), "{label}");
+        }
+    }
+
+    #[test]
     fn clicking_tab_context_menu_close_leaves_context_menu_mode() {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("one");
@@ -3516,11 +3598,11 @@ mod tests {
         app.state.mode = Mode::Terminal;
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
-        let second_tab = app.state.view.tab_hit_areas[1];
+        let second_tab = app.state.view.island_marker_hit_areas[1];
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Right),
-            second_tab.x + 1,
+            second_tab.x,
             second_tab.y,
         ));
 
@@ -3651,6 +3733,7 @@ mod tests {
     #[test]
     fn wheel_over_overflowing_tab_bar_switches_tabs() {
         let mut app = app_for_mouse_test();
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("one");
         ws.tabs[0].set_custom_name("very-long-one".into());
         ws.test_add_tab(Some("very-long-two"));
@@ -3946,7 +4029,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_new_tab_button_skips_dialog_when_prompt_disabled() {
+    fn island_new_tab_button_uses_shared_hit_area_when_prompt_disabled() {
         let mut app = app_for_mouse_test();
         app.state.workspaces = vec![Workspace::test_new("one")];
         app.state.active = Some(0);
@@ -3956,6 +4039,8 @@ mod tests {
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
         let new_tab_area = app.state.view.new_tab_hit_area;
+        let marker = app.state.view.island_marker_hit_areas[0];
+        assert_eq!(new_tab_area.x, marker.x + marker.width + 1);
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             new_tab_area.x + 1,

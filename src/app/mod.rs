@@ -582,6 +582,8 @@ impl App {
                 workspace_card_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
                 tab_hit_areas: Vec::new(),
+                island_marker_hit_areas: Vec::new(),
+                island_bell_hit_area: Rect::default(),
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
                 new_tab_hit_area: Rect::default(),
@@ -649,6 +651,8 @@ impl App {
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             tab_bar_position: config.ui.tab_bar_position,
+            tab_bar_style: config.ui.tab_bar_style,
+            island: config.ui.island,
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
@@ -1459,6 +1463,8 @@ impl App {
                     config.ui.show_agent_labels_on_pane_borders;
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.tab_bar_position = config.ui.tab_bar_position;
+                self.state.tab_bar_style = config.ui.tab_bar_style;
+                self.state.island = config.ui.island;
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 let previous_agents_view = self.state.agents_view;
@@ -3165,6 +3171,58 @@ mod tests {
             state::CompactRailLeading::Inherit
         );
         assert!(app.state.compact_rail_marks.is_empty());
+    }
+
+    #[test]
+    fn live_island_settings_flip_both_ways() {
+        let mut app = test_app();
+        let mut config = Config::default();
+        assert_eq!(
+            app.state.tab_bar_style,
+            crate::config::TabBarStyleConfig::Island
+        );
+        assert_eq!(
+            app.state.island.position,
+            crate::config::IslandPositionConfig::Center
+        );
+        assert_eq!(
+            app.state.island.display,
+            crate::config::IslandDisplayConfig::Dots
+        );
+
+        config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
+        config.ui.island.position = crate::config::IslandPositionConfig::Left;
+        config.ui.island.display = crate::config::IslandDisplayConfig::Labels;
+        app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(
+            app.state.tab_bar_style,
+            crate::config::TabBarStyleConfig::Classic
+        );
+        assert_eq!(
+            app.state.island.position,
+            crate::config::IslandPositionConfig::Left
+        );
+        assert_eq!(
+            app.state.island.display,
+            crate::config::IslandDisplayConfig::Labels
+        );
+
+        config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        config.ui.island.position = crate::config::IslandPositionConfig::Center;
+        config.ui.island.display = crate::config::IslandDisplayConfig::Dots;
+        app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(
+            app.state.tab_bar_style,
+            crate::config::TabBarStyleConfig::Island
+        );
+        assert_eq!(
+            app.state.island.position,
+            crate::config::IslandPositionConfig::Center
+        );
+        assert_eq!(
+            app.state.island.display,
+            crate::config::IslandDisplayConfig::Dots
+        );
     }
 
     #[test]

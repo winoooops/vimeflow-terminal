@@ -63,7 +63,10 @@ experiment phase (M2c), and API/CLI exposure of records is deferred with them.
 ## 3. Lineage and research basis
 
 The Electron original is the **Session Island** — a session switcher and a
-four-stage notification center sharing one morphing capsule. The contract
+four-stage notification center sharing one morphing capsule, itself modeled
+on the Noctalia (KDE) pill control (operator-confirmed visual reference,
+2026-08-31: dark stadium, wide active pill, dot markers, in-capsule bell
+with unread badge). The contract
 worth porting, verified in its source and specs:
 
 - Positional three-tone palette (active pill / before / after-dimmed),
@@ -184,6 +187,16 @@ a registered fork-modified file. Nothing else about layout changes.
   + `panel_contrast_fg`; markers before the active = `p.overlay1` fg;
   after = `p.overlay0` fg (the dim tone the rail already uses). No new
   palette entries, no state colors (decision §2/§4).
+- **Rounded silhouette** (amended 2026-08-31, operator decision after the
+  first live look): the capsule and the active pill get semicircle end
+  caps — the Powerline glyphs U+E0B6/U+E0B4 drawn as foreground-on-row-bg
+  color runs, the standard TUI stadium technique. Ghostty, Kitty and
+  WezTerm synthesize these glyphs natively without a patched font; for
+  other terminals `island.caps = "square"` restores the flat block look.
+  Default `"round"` — a deliberate exception to the ASCII-first rule,
+  justified by native terminal synthesis being widespread and the escape
+  hatch being one key. Caps cost 2 cells on the capsule and 2 per active
+  pill; the width budgets and `markers_that_fit` account for them.
 - **Trailing `+`** re-uses today's new-tab affordance and its
   `mouse_chrome` gating; scroll buttons do not exist under island
   (decision 7).
@@ -364,6 +377,7 @@ tab_bar_style = "island"   # "island" (default) | "classic"
 [ui.island]
 position = "center"        # "center" | "left"
 display  = "dots"          # "dots" | "numbers" | "labels"
+caps     = "round"         # "round" | "square"  (silhouette; round = powerline semicircles)
 arrivals = "toast"         # "toast" | "silent"        (M2b)
 bell     = "!"             # 1-2 cell string override  (M2b)
 ```
