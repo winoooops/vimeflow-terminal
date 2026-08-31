@@ -609,7 +609,11 @@
           "key": "ui.sidebar.agents_view",
           "type": "\"cards\" | \"legacy\"",
           "default": "\"cards\"",
-          "description": "Choose adaptive Agent cards or the legacy configurable row view. Reloads live."
+          "description": "Choose adaptive Agent cards or the legacy configurable row view. Reloads live.",
+          "values": [
+            "cards",
+            "legacy"
+          ]
         },
         {
           "key": "ui.sidebar.agents_hide_idle",
@@ -622,6 +626,23 @@
           "type": "boolean",
           "default": "true",
           "description": "Show position numbers beside workspace and Agent state dots in the collapsed compact rail. Reloads live."
+        },
+        {
+          "key": "ui.sidebar.compact_rail_leading",
+          "type": "\"number\" | \"none\" | \"agent\"",
+          "default": "inherit from ui.sidebar.compact_rail_numbers",
+          "description": "Optional leading field for compact Agent rows. When unset, inherits ui.sidebar.compact_rail_numbers. Reloads live.",
+          "values": [
+            "number",
+            "none",
+            "agent"
+          ]
+        },
+        {
+          "key": "ui.sidebar.compact_rail_marks",
+          "type": "table of strings",
+          "default": "{}",
+          "description": "Per-agent two-cell compact-rail mark overrides keyed by canonical agent slugs. One-cell values are right-padded; invalid entries fall back to built-in marks. Reloads live."
         },
         {
           "key": "ui.mobile_width_threshold",

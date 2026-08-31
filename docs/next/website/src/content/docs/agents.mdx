@@ -155,9 +155,25 @@ These settings reload live:
 agents_view = "cards"      # default; use "legacy" for configurable rows
 agents_hide_idle = false   # hide seen idle agents from cards and focus indexes
 compact_rail_numbers = true # set false to show state dots without position numbers
+compact_rail_leading = "agent" # optional: "number", "none", or "agent"
 ```
 
-Switching to `legacy` restores the configurable `[ui.sidebar.agents]` row view. Agent row settings are ignored in cards mode and produce a configuration diagnostic when explicitly present. Compact-rail numbering reloads live and does not change row selection or click targets.
+In `agent` mode, compact Agent rows show two-character identity marks such as `Cl` and `Cx` beside their state dots. Workspace glance rows still follow `compact_rail_numbers`. When `compact_rail_leading` is omitted, Agent rows inherit `compact_rail_numbers`; the other values explicitly show numbers or no leading field.
+
+Override marks by canonical agent slug:
+
+```toml
+# Any Unicode string your terminal font renders: width 1-2; width-1 is padded; invalid entries fall back to the built-in mark with a diagnostic.
+[ui.sidebar.compact_rail_marks]
+claude = "C"
+codex = "CX"
+# gemini = "Ge"   # Gemini CLI
+# copilot = "Gh"  # GitHub Copilot CLI
+# kimi = "Ki"     # Kimi Code CLI
+# opencode = "Oc" # OpenCode
+```
+
+Switching to `legacy` restores the configurable `[ui.sidebar.agents]` row view. Agent row settings are ignored in cards mode and produce a configuration diagnostic when explicitly present. Compact-rail settings reload live and do not change row selection or click targets.
 
 ## Custom agent labels
 
