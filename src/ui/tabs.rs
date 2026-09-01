@@ -574,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn island_view_exposes_marker_and_new_tab_hit_areas() {
+    fn island_view_exposes_marker_hit_areas_without_new_tab() {
         let mut app = AppState::test_new();
         let mut ws = Workspace::test_new("test");
         for _ in 1..4 {
@@ -583,21 +583,33 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
 
-        let view = compute_tab_bar_view(&app, Rect::new(5, 2, 30, 1));
+        let view = compute_tab_bar_view(&app, Rect::new(5, 2, 40, 1));
 
         assert!(view.tab_hit_areas.is_empty());
         assert_eq!(
             view.island_marker_hit_areas,
             vec![
-                Rect::new(14, 2, 3, 1),
-                Rect::new(19, 2, 1, 1),
-                Rect::new(21, 2, 1, 1),
-                Rect::new(23, 2, 1, 1),
+                Rect::new(20, 2, 3, 1),
+                Rect::new(25, 2, 1, 1),
+                Rect::new(27, 2, 1, 1),
+                Rect::new(29, 2, 1, 1),
             ]
         );
-        assert_eq!(view.new_tab_hit_area, Rect::new(24, 2, 3, 1));
+        assert_eq!(view.new_tab_hit_area, Rect::default());
         assert_eq!(view.island_bell_hit_area, Rect::default());
         assert_eq!(view.scroll_left_hit_area, Rect::default());
         assert_eq!(view.scroll_right_hit_area, Rect::default());
+
+        app.island.display = crate::config::IslandDisplayConfig::Numbers;
+        let view = compute_tab_bar_view(&app, Rect::new(5, 2, 40, 1));
+        assert_eq!(
+            view.island_marker_hit_areas,
+            vec![
+                Rect::new(17, 2, 3, 1),
+                Rect::new(22, 2, 3, 1),
+                Rect::new(26, 2, 3, 1),
+                Rect::new(30, 2, 3, 1),
+            ]
+        );
     }
 }

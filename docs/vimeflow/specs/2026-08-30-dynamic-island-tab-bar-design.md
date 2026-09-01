@@ -132,10 +132,13 @@ review round 1)
    `src/ghostty/mod.rs:805-839`, and retained OSC 9;4 feeds detection, not
    an attention event). The taxonomy enum ships extensible; mapping table
    in §6.
-7. **Interaction parity on the island.** The `+` new-tab button stays (at
-   the capsule's trailing edge); right-click on a marker opens the same tab
-   context menu as a labeled tab; block pagination replaces scroll buttons;
-   drag-reorder is v1-deferred (see §2).
+7. **Interaction parity on the island** (amended 2026-08-31, operator
+   minimal-design override): the island carries **no `+` button** — the
+   capsule holds only markers (and, from M2b, the bell), matching
+   Noctalia's minimalism; new tabs come from keybinds and the tab context
+   menu, and `"classic"` keeps its `+` untouched. Right-click on a marker
+   opens the same tab context menu as a labeled tab; block pagination
+   replaces scroll buttons; drag-reorder is v1-deferred (see §2).
 8. **Row visibility under `hide_tab_bar_when_single_tab`.** That option
    defaults to `false` (`src/config/model.rs:1063`), so by default the
    island row always renders and nothing changes. When a user enables
@@ -175,14 +178,31 @@ a registered fork-modified file. Nothing else about layout changes.
     it from panel_bg (no box-drawing in a 1-cell row)
 ```
 
-- **Markers per display mode** (`island.display`):
-  - `dots`: inactive `●`; active = a 3-cell accent-bg pill with a centered
-    `━` (no text).
-  - `numbers`: inactive = its global tab number (1–2 cells); active =
-    ` N ` on accent bg.
-  - `labels`: inactive `●`; active = ` name ` on accent bg, truncated via
-    `truncate_end` (`src/ui/text.rs`) to `clamp(3, 16)` cells — the
-    original's 48–160px clamp scaled to cells.
+- **Markers per display mode** (`island.display`) — amended 2026-08-31
+  for the Noctalia-minimal look: the active pill is a **pure solid shape,
+  never a glyph**:
+  - `dots`: inactive = `⬤` (U+2B24, single cell — a true circle at any
+    font metric, ~80% cell height, faithful to the reference's
+    smaller-than-pill dots; chosen over the 2-cell semicircle composition
+    whose roundness was font-aspect-dependent, 2026-08-31); square caps
+    keep `●`. Active = a **3-cell solid accent run** (5 with caps; empty
+    spaces on accent bg — color is the content).
+  - `numbers` (amended 2026-09-01): inactive = a **mini stadium holding
+    the digit** — cap + digit(s) + cap, a muted existing-token bg with
+    the positional tone carried by the digit fg — so numbers speak the
+    same round language; bare digits remain only under square caps.
+    Active = ` N ` (one-space padding) on accent bg with caps as
+    everywhere.
+  - `labels`: inactive = the same `⬤` as dots mode (round caps) or `●`
+    (square); active = ` name ` (one-space padding) on
+    accent bg, total width `clamp(3, 16)` cells via `truncate_end`.
+  - Capsule padding under round caps is **per-side conditional**
+    (amended 2026-09-01 after the flush look): **0** on a side whose
+    adjacent element is the active pill's cap — curves nest — and **1**
+    on a side whose adjacent element is a circle, digit, label dot, or
+    the page indicator, so no glyph is ever crowded by the capsule cap.
+    Page-math budgets conservatively reserve 1 per side (stable-input
+    rule). Square caps keep 1 cell both sides.
 - **Positional palette from existing tokens only**: active = `p.accent` bg
   + `panel_contrast_fg`; markers before the active = `p.overlay1` fg;
   after = `p.overlay0` fg (the dim tone the rail already uses). No new

@@ -823,8 +823,12 @@ mod tests {
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
         assert_eq!(app.view.terminal_area, Rect::new(26, 0, 54, 19));
         assert_eq!(app.view.tab_bar_rect, Rect::new(26, 19, 54, 1));
-        assert!(app.view.tab_hit_areas.iter().all(|rect| rect.y == 19));
-        assert_eq!(app.view.new_tab_hit_area.y, 19);
+        assert!(app
+            .view
+            .island_marker_hit_areas
+            .iter()
+            .all(|rect| rect.y == 19));
+        assert_eq!(app.view.new_tab_hit_area, Rect::default());
 
         let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
         terminal.draw(|frame| render(&app, frame)).unwrap();
@@ -863,7 +867,7 @@ mod tests {
             .island_marker_hit_areas
             .iter()
             .all(|rect| rect.width > 0));
-        assert!(app.view.new_tab_hit_area.width > 0);
+        assert_eq!(app.view.new_tab_hit_area, Rect::default());
 
         assert!(app.workspaces[0].close_tab(1));
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
@@ -1172,6 +1176,7 @@ mod tests {
     #[test]
     fn new_tab_button_tracks_rightmost_tab_when_tabs_fit() {
         let mut app = crate::app::state::AppState::test_new();
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("test");
         ws.test_add_tab(Some("logs"));
 
@@ -1184,7 +1189,7 @@ mod tests {
 
         let last_visible = app
             .view
-            .island_marker_hit_areas
+            .tab_hit_areas
             .iter()
             .rev()
             .find(|rect| rect.width > 0)

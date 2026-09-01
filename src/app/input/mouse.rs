@@ -3431,7 +3431,6 @@ mod tests {
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
         let second_tab = app.state.view.island_marker_hit_areas[1];
-        let new_tab = app.state.view.new_tab_hit_area;
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
@@ -3453,12 +3452,6 @@ mod tests {
             second_tab.x,
             second_tab.y,
         ));
-        app.handle_mouse(mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            new_tab.x,
-            new_tab.y,
-        ));
-
         app.state.drag = Some(DragState {
             target: DragTarget::SidebarDivider,
         });
@@ -4029,7 +4022,7 @@ mod tests {
     }
 
     #[test]
-    fn island_new_tab_button_uses_shared_hit_area_when_prompt_disabled() {
+    fn island_has_no_new_tab_button_and_classic_keeps_it() {
         let mut app = app_for_mouse_test();
         app.state.workspaces = vec![Workspace::test_new("one")];
         app.state.active = Some(0);
@@ -4038,9 +4031,12 @@ mod tests {
         app.state.prompt_new_tab_name = false;
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+        assert_eq!(app.state.view.new_tab_hit_area, Rect::default());
+
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
         let new_tab_area = app.state.view.new_tab_hit_area;
-        let marker = app.state.view.island_marker_hit_areas[0];
-        assert_eq!(new_tab_area.x, marker.x + marker.width + 1);
+        assert!(new_tab_area.width > 0);
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             new_tab_area.x + 1,

@@ -305,19 +305,19 @@ mod tests {
         assert!(app.view.tab_hit_areas.is_empty());
         assert_eq!(
             app.view.island_marker_hit_areas,
-            vec![Rect::new(62, 0, 3, 1), Rect::new(67, 0, 1, 1)]
+            vec![Rect::new(63, 0, 3, 1), Rect::new(68, 0, 1, 1)]
         );
-        assert_eq!(app.view.new_tab_hit_area, Rect::new(68, 0, 3, 1));
+        assert_eq!(app.view.new_tab_hit_area, Rect::default());
         assert!(frame.cursor.is_some());
         assert_eq!(frame.hyperlinks, vec![uri.to_owned()]);
 
-        let island_cells = &frame.cells[59..73];
+        let island_cells = &frame.cells[61..71];
         assert_eq!(
             island_cells
                 .iter()
                 .map(|cell| cell.symbol.as_str())
                 .collect::<String>(),
-            "\u{e0b6} \u{e0b6} ━ \u{e0b4} ● +  \u{e0b4}"
+            "\u{e0b6}\u{e0b6}   \u{e0b4} ⬤ \u{e0b4}"
         );
         assert_eq!(
             island_cells[0].fg,
@@ -327,16 +327,56 @@ mod tests {
             island_cells[0].bg,
             crate::protocol::color_to_u32(app.palette.panel_bg)
         );
-        assert!(island_cells[3..6]
+        assert!(island_cells[2..5]
             .iter()
             .all(|cell| cell.bg == crate::protocol::color_to_u32(app.palette.accent)));
         assert_eq!(
-            island_cells[8].fg,
+            island_cells[7].fg,
             crate::protocol::color_to_u32(app.palette.overlay0)
         );
+    }
+
+    #[tokio::test]
+    async fn desktop_number_island_semantic_frame_is_characterized() {
+        let mut app = full_app_characterization_state("https://example.com/full-app");
+        app.island.display = crate::config::IslandDisplayConfig::Numbers;
+        let frame = full_app_frame(&mut app, Rect::new(0, 0, 106, 20));
+
         assert_eq!(
-            island_cells[10].fg,
-            crate::protocol::color_to_u32(app.palette.overlay1)
+            app.view.island_marker_hit_areas,
+            vec![Rect::new(62, 0, 3, 1), Rect::new(67, 0, 3, 1)]
+        );
+        let island_cells = &frame.cells[60..71];
+        assert_eq!(
+            island_cells
+                .iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>(),
+            "\u{e0b6}\u{e0b6} 1 \u{e0b4} \u{e0b6}2\u{e0b4}\u{e0b4}"
+        );
+        assert!(island_cells[2..5]
+            .iter()
+            .all(|cell| cell.bg == crate::protocol::color_to_u32(app.palette.accent)));
+        assert_eq!(
+            (island_cells[7].fg, island_cells[7].bg),
+            (
+                crate::protocol::color_to_u32(app.palette.surface1),
+                crate::protocol::color_to_u32(app.palette.surface0),
+            )
+        );
+        assert_eq!(
+            (island_cells[8].fg, island_cells[8].bg),
+            (
+                crate::protocol::color_to_u32(app.palette.overlay0),
+                crate::protocol::color_to_u32(app.palette.surface1),
+            )
+        );
+        assert_eq!(
+            (island_cells[9].fg, island_cells[9].bg),
+            (
+                crate::protocol::color_to_u32(app.palette.surface1),
+                crate::protocol::color_to_u32(app.palette.surface0),
+            )
         );
     }
 
