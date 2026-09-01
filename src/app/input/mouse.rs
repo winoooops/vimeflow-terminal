@@ -704,7 +704,9 @@ impl AppState {
                     } else if let Some(press) = &self.tab_press {
                         let delta_col = mouse.column.abs_diff(press.start_col);
                         let delta_row = mouse.row.abs_diff(press.start_row);
-                        if delta_col.max(delta_row) >= TAB_DRAG_THRESHOLD {
+                        if self.tab_bar_style == crate::config::TabBarStyleConfig::Classic
+                            && delta_col.max(delta_row) >= TAB_DRAG_THRESHOLD
+                        {
                             self.drag = Some(DragState {
                                 target: DragTarget::TabReorder {
                                     ws_idx: press.ws_idx,
@@ -3497,6 +3499,39 @@ mod tests {
         assert_eq!(app.state.workspaces[0].active_tab, second_tab_idx);
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(second_pane));
         assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn one_cell_island_marker_drag_still_focuses_tab() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("one");
+        let second_tab_idx = ws.test_add_tab(Some("two"));
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let second_tab = app.state.view.island_marker_hit_areas[second_tab_idx];
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            second_tab.x,
+            second_tab.y,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            second_tab.x + 1,
+            second_tab.y,
+        ));
+        assert!(app.state.drag.is_none());
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            second_tab.x + 1,
+            second_tab.y,
+        ));
+
+        assert_eq!(app.state.workspaces[0].active_tab, second_tab_idx);
     }
 
     #[test]

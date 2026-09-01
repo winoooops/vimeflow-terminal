@@ -168,9 +168,8 @@ a registered fork-modified file. Nothing else about layout changes.
 ### Capsule anatomy (left to right)
 
 ```
-  ●  2  ● ● +           numbers mode, active tab 2, position center
-  |  |        |
-  |  |        └ trailing new-tab affordance (existing gating)
+  ●  2  ● ●             numbers mode, active tab 2, position center
+  |  |
   |  └ pill: accent bg, panel_contrast_fg — same pair as today's
   |    active labeled tab
   └ markers: 1 cell each, separated by 1 space; the whole capsule sits
@@ -217,18 +216,15 @@ a registered fork-modified file. Nothing else about layout changes.
   justified by native terminal synthesis being widespread and the escape
   hatch being one key. Caps cost 2 cells on the capsule and 2 per active
   pill; the width budgets and `markers_that_fit` account for them.
-- **Trailing `+`** re-uses today's new-tab affordance and its
-  `mouse_chrome` gating; scroll buttons do not exist under island
-  (decision 7).
 - **Bell region** appears only when `!island_records.is_empty()` (M2b;
-  §6): `!` + count, 3–4 cells at the capsule's trailing edge before `+`.
+  §6): `!` + count, 3–4 cells at the capsule's trailing edge.
 
 ### Position, width, batching
 
 - `island.position = "center"`: capsule x-centered in the row rect,
   clamped so it never clips; `"left"`: starts at the row's left edge like
   labeled tabs today.
-- Width = markers + separators + padding (+ bell + `+`). If it exceeds the
+- Width = markers + separators + padding (+ bell). If it exceeds the
   row, batching engages early (below).
 - **Batching** (original's stable-page rule, width-adaptive): page size =
   `min(10, markers_that_fit)`. Worst-case marker budgets depend only on
@@ -253,9 +249,9 @@ a registered fork-modified file. Nothing else about layout changes.
 ### Hit areas and input
 
 - `TabBarView` gains island fields computed in `compute_tab_bar_view`:
-  `island_marker_hit_areas: Vec<Rect>`, `island_bell_hit_area: Rect`,
-  reusing the existing `new_tab_hit_area`. All mouse routing joins the
-  current chrome handling in `src/app/input/mouse.rs`.
+  `island_marker_hit_areas: Vec<Rect>`, `island_bell_hit_area: Rect`. All
+  mouse routing joins the current chrome handling in
+  `src/app/input/mouse.rs`.
 - Left-click marker → focus that tab (existing action, keeps terminal
   focus). Right-click marker → the same tab context menu a labeled tab
   opens today (decision 7). No hover tooltips in v1 — `labels` mode is the
@@ -464,7 +460,7 @@ implements → Claude reviews → `just check` → PR `refs #11`):
 
 1. **M2a — the capsule** (this branch): dispatch + island render (dots/
    numbers/labels, positional palette, position, adaptive batching), hit
-   areas + click/right-click/`+`, the row predicate **in its M2a
+   areas + click/right-click, the row predicate **in its M2a
    degenerate form** — `island_records`/`island_panel_open` do not exist
    yet, so their terms are constant-false and the predicate reduces to
    `tabs > 1`; the full decision-8 condition lands with M2b's fields —
