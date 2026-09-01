@@ -164,7 +164,11 @@ fn marker_text(
     }
 }
 
-fn layout(app: &AppState, area: Rect) -> Option<IslandLayout> {
+fn layout_for_display(
+    app: &AppState,
+    area: Rect,
+    display: IslandDisplayConfig,
+) -> Option<IslandLayout> {
     if area.width == 0 || area.height == 0 {
         return None;
     }
@@ -177,17 +181,12 @@ fn layout(app: &AppState, area: Rect) -> Option<IslandLayout> {
         ws.tabs.len(),
         ws.active_tab,
         usize::from(area.width),
-        app.island.display,
+        display,
         app.island.caps,
     );
     let page_end = (page.start + page.page_size).min(ws.tabs.len());
     let marker_texts = (page.start..page_end)
-        .map(|tab_idx| {
-            (
-                tab_idx,
-                marker_text(ws, tab_idx, app.island.display, app.island.caps),
-            )
-        })
+        .map(|tab_idx| (tab_idx, marker_text(ws, tab_idx, display, app.island.caps)))
         .collect::<Vec<_>>();
     let marker_width = marker_texts
         .iter()
@@ -198,12 +197,12 @@ fn layout(app: &AppState, area: Rect) -> Option<IslandLayout> {
     let first_marker_has_cap = marker_texts.first().is_some_and(|(tab_idx, _)| {
         *tab_idx == ws.active_tab
             || (app.island.caps == IslandCapsConfig::Round
-                && app.island.display == IslandDisplayConfig::Numbers)
+                && display == IslandDisplayConfig::Numbers)
     });
     let last_marker_has_cap = marker_texts.last().is_some_and(|(tab_idx, _)| {
         *tab_idx == ws.active_tab
             || (app.island.caps == IslandCapsConfig::Round
-                && app.island.display == IslandDisplayConfig::Numbers)
+                && display == IslandDisplayConfig::Numbers)
     });
     let left_padding = capsule_padding(
         app.island.caps,
@@ -259,6 +258,13 @@ fn layout(app: &AppState, area: Rect) -> Option<IslandLayout> {
         capsule,
         indicator,
         markers,
+    })
+}
+
+fn layout(app: &AppState, area: Rect) -> Option<IslandLayout> {
+    layout_for_display(app, area, app.island.display).or_else(|| match app.island.display {
+        IslandDisplayConfig::Labels => layout_for_display(app, area, IslandDisplayConfig::Dots),
+        _ => None,
     })
 }
 
@@ -717,6 +723,29 @@ mod tests {
 
         assert_eq!(display_width(&long), LABEL_MAX_WIDTH);
         assert!(long.contains('…'));
+    }
+
+    #[test]
+    fn oversized_label_island_falls_back_to_a_clickable_dot() {
+        let area = Rect::new(0, 0, 27, 1);
+        let mut app = app_with_tabs(11, 10);
+        app.island.display = IslandDisplayConfig::Labels;
+        app.workspaces[0].tabs[10].set_custom_name("a very long island label".to_string());
+
+        let hit_area = compute_tab_bar_view(&app, area).island_marker_hit_areas[10];
+        assert!(hit_area.width > 0);
+
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| render_tab_bar(&app, frame, area))
+            .expect("draw fallback island");
+        assert_eq!(
+            terminal.backend().buffer()[(hit_area.x, hit_area.y)]
+                .style()
+                .bg,
+            Some(app.palette.accent)
+        );
     }
 
     #[test]
