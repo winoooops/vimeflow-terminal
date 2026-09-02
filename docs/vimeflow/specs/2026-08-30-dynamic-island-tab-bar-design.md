@@ -246,6 +246,56 @@ a registered fork-modified file. Nothing else about layout changes.
   size — the original shipped this exact bug and fixed it
   (`derived-state-consistency.md` #449). No per-marker scrolling, ever.
 
+### Motion (amended 2026-09-01 — pulled forward from M2c as the next slice)
+
+`island.motion = "smooth" (default) | "steps" | "off"` animates **active-tab
+changes within the current page** under island style. Page changes, style
+flips, and workspace switches always cut — never slide.
+
+- **smooth**: ~150ms on an ease-out-cubic schedule (the original's curve).
+  The outgoing pill shrinks toward its resting marker while the incoming
+  marker grows to the pill **in the same frames**. Width conservation is
+  mode-dependent: in `dots` and `numbers` the settled marker widths are
+  fixed, so the swap conserves total capsule width; in `labels` the two
+  settled totals differ, so the **capsule width itself tweens** between
+  them on the same curve (the island breathes — closer to the reference,
+  not a defect). Moving edges render sub-cell widths via the horizontal
+  eighth-blocks `▏▎▍▌▋▊▉` (plain Unicode); both participants' colors lerp
+  between accent and their positional tone — truecolor only, since the
+  wire protocol always emits RGB and terminal-side degradation is the
+  terminal's existing behavior, out of scope here. Caps settle on the
+  final frame. Incoming digit/label content appears only above ~60%
+  progress so text is never squashed; mini-stadiums morph like the pill.
+- **steps**: the same synchronized morph in whole-cell steps on the same
+  ease-out schedule — no partial blocks, no color lerp.
+- **off**: instant switching, byte-identical to the pre-motion behavior —
+  the reduced-motion escape this spec has promised throughout.
+
+Mechanics: `island_anim: Option<IslandAnim { from_tab, to_tab,
+progress: f32 }>` in `AppState` (pure presentation). **Progress is a
+stored field**, advanced by the server event loop's ~16ms ticks (the same
+time-driven machinery M2b's toast dwell requires — the fork's first
+time-driven chrome; tick source in the registered `src/server/headless.rs`
+loop, where the `started_at` instant lives server-side for tick math);
+render stays a pure function of `&AppState`. **Settled vs visual geometry
+are distinct functions**: `layout()` remains the settled geometry and
+feeds `compute_tab_bar_view`/hit areas unchanged; rendering calls an
+animated overlay (`layout_animated(app, area)` reading the stored
+progress) that interpolates from settled endpoints. **Animation never
+affects logic**: page math, batching, and hit areas use settled
+destination geometry from the first frame (clicks during motion behave as
+if the switch completed). The anim clears instantly to settled state on:
+natural settle, page change, style flip, **any change to `[ui.island]`
+config (including `motion` itself) via live reload**, and **any tab
+topology change in the active workspace** (create/close/reorder) — which
+also makes the index-based `from_tab`/`to_tab` safe for the animation's
+short life.
+
+Tests: pure interpolator table (progress → per-mode widths, eighth-block
+edge selection, width conservation); tick expiry; cell-exact frames at
+0/50/100%; hit-areas-snap-immediately; `off` byte-identical to M2a;
+steps-mode coverage.
+
 ### Hit areas and input
 
 - `TabBarView` gains island fields computed in `compute_tab_bar_view`:
@@ -394,6 +444,7 @@ tab_bar_style = "island"   # "island" (default) | "classic"
 position = "center"        # "center" | "left"
 display  = "dots"          # "dots" | "numbers" | "labels"
 caps     = "round"         # "round" | "square"  (silhouette; round = powerline semicircles)
+motion   = "smooth"        # "smooth" | "steps" | "off"  (within-page tab-switch morph)
 arrivals = "toast"         # "toast" | "silent"        (M2b)
 bell     = "!"             # 1-2 cell string override  (M2b)
 ```
