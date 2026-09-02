@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -17,6 +18,8 @@ const TAB_SCROLL_BUTTON_WIDTH: u16 = 3;
 pub(crate) struct TabBarView {
     pub scroll: usize,
     pub tab_hit_areas: Vec<Rect>,
+    pub island_marker_hit_areas: Vec<Rect>,
+    pub island_bell_hit_area: Rect,
     pub scroll_left_hit_area: Rect,
     pub scroll_right_hit_area: Rect,
     pub new_tab_hit_area: Rect,
@@ -107,7 +110,7 @@ fn max_tab_scroll(ws: &crate::workspace::Workspace, area: Rect) -> usize {
         .unwrap_or(0)
 }
 
-pub(crate) fn compute_tab_bar_view(
+fn compute_classic_tab_bar_view(
     ws: &crate::workspace::Workspace,
     area: Rect,
     current_scroll: usize,
@@ -128,6 +131,8 @@ pub(crate) fn compute_tab_bar_view(
         return TabBarView {
             scroll,
             tab_hit_areas: layout_tab_hit_areas(ws, area, scroll),
+            island_marker_hit_areas: Vec::new(),
+            island_bell_hit_area: Rect::default(),
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area: Rect::default(),
@@ -154,6 +159,8 @@ pub(crate) fn compute_tab_bar_view(
         return TabBarView {
             scroll: 0,
             tab_hit_areas: all_tabs,
+            island_marker_hit_areas: Vec::new(),
+            island_bell_hit_area: Rect::default(),
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area,
@@ -198,9 +205,30 @@ pub(crate) fn compute_tab_bar_view(
     TabBarView {
         scroll,
         tab_hit_areas,
+        island_marker_hit_areas: Vec::new(),
+        island_bell_hit_area: Rect::default(),
         scroll_left_hit_area: left_hit_area,
         scroll_right_hit_area: right_hit_area,
         new_tab_hit_area,
+    }
+}
+
+pub(crate) fn compute_tab_bar_view(app: &AppState, area: Rect) -> TabBarView {
+    match app.tab_bar_style {
+        crate::config::TabBarStyleConfig::Classic => app
+            .active
+            .and_then(|idx| app.workspaces.get(idx))
+            .map(|ws| {
+                compute_classic_tab_bar_view(
+                    ws,
+                    area,
+                    app.tab_scroll,
+                    app.tab_scroll_follow_active,
+                    app.mouse_capture,
+                )
+            })
+            .unwrap_or_default(),
+        crate::config::TabBarStyleConfig::Island => super::island::compute_tab_bar_view(app, area),
     }
 }
 
@@ -248,6 +276,13 @@ fn tab_drop_indicator_x(
 }
 
 pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
+    match app.tab_bar_style {
+        crate::config::TabBarStyleConfig::Classic => render_classic_tab_bar(app, frame, area),
+        crate::config::TabBarStyleConfig::Island => super::island::render_tab_bar(app, frame, area),
+    }
+}
+
+fn render_classic_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -411,6 +446,7 @@ mod tests {
     #[test]
     fn tab_bar_marks_zoomed_tabs_without_renaming_them() {
         let mut app = AppState::test_new();
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("test");
         ws.tabs[0].zoomed = true;
         let custom_tab = ws.test_add_tab(Some("test"));
@@ -419,7 +455,8 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view =
+            compute_classic_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -441,12 +478,14 @@ mod tests {
     #[test]
     fn active_auto_named_tab_keeps_readable_weight() {
         let mut app = AppState::test_new();
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let ws = Workspace::test_new("test");
 
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view =
+            compute_classic_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -486,13 +525,15 @@ mod tests {
     #[test]
     fn tab_bar_renders_trailing_cjk_character() {
         let mut app = AppState::test_new();
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("test");
         ws.tabs[0].set_custom_name("提交 herdr 的反馈".into());
 
         app.active = Some(0);
         app.workspaces = vec![ws];
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view =
+            compute_classic_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -503,5 +544,72 @@ mod tests {
 
         let row = buffer_row_text(terminal.backend().buffer(), app.view.tab_bar_rect, 0);
         assert!(row.contains('馈'), "tab row: {row:?}");
+    }
+
+    #[test]
+    fn classic_style_preserves_existing_tab_bar_text() {
+        let mut app = AppState::test_new();
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
+        let mut ws = Workspace::test_new("test");
+        ws.test_add_tab(Some("work"));
+        app.workspaces = vec![ws];
+        app.active = Some(0);
+        app.view.tab_bar_rect = Rect::new(0, 0, 24, 1);
+        let view = compute_tab_bar_view(&app, app.view.tab_bar_rect);
+        app.view.tab_hit_areas = view.tab_hit_areas;
+        app.view.tab_scroll_left_hit_area = view.scroll_left_hit_area;
+        app.view.tab_scroll_right_hit_area = view.scroll_right_hit_area;
+        app.view.new_tab_hit_area = view.new_tab_hit_area;
+
+        let backend = TestBackend::new(24, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_tab_bar(&app, frame, app.view.tab_bar_rect))
+            .unwrap();
+        let row = (0..24)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+
+        assert_eq!(row, concat!(" 1      ", " ", " work   ", " + ", "    "));
+    }
+
+    #[test]
+    fn island_view_exposes_marker_hit_areas_without_new_tab() {
+        let mut app = AppState::test_new();
+        let mut ws = Workspace::test_new("test");
+        for _ in 1..4 {
+            ws.test_add_tab(None);
+        }
+        app.workspaces = vec![ws];
+        app.active = Some(0);
+
+        let view = compute_tab_bar_view(&app, Rect::new(5, 2, 40, 1));
+
+        assert!(view.tab_hit_areas.is_empty());
+        assert_eq!(
+            view.island_marker_hit_areas,
+            vec![
+                Rect::new(20, 2, 3, 1),
+                Rect::new(25, 2, 1, 1),
+                Rect::new(27, 2, 1, 1),
+                Rect::new(29, 2, 1, 1),
+            ]
+        );
+        assert_eq!(view.new_tab_hit_area, Rect::default());
+        assert_eq!(view.island_bell_hit_area, Rect::default());
+        assert_eq!(view.scroll_left_hit_area, Rect::default());
+        assert_eq!(view.scroll_right_hit_area, Rect::default());
+
+        app.island.display = crate::config::IslandDisplayConfig::Numbers;
+        let view = compute_tab_bar_view(&app, Rect::new(5, 2, 40, 1));
+        assert_eq!(
+            view.island_marker_hit_areas,
+            vec![
+                Rect::new(17, 2, 3, 1),
+                Rect::new(22, 2, 3, 1),
+                Rect::new(26, 2, 3, 1),
+                Rect::new(30, 2, 3, 1),
+            ]
+        );
     }
 }

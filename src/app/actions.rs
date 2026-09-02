@@ -1740,24 +1740,22 @@ impl AppState {
 
     pub(crate) fn refresh_tab_bar_view(&mut self) {
         let area = self.view.tab_bar_rect;
-        let Some(ws) = self.active.and_then(|idx| self.workspaces.get(idx)) else {
+        let Some(_ws) = self.active.and_then(|idx| self.workspaces.get(idx)) else {
             self.tab_scroll = 0;
             self.view.tab_hit_areas.clear();
+            self.view.island_marker_hit_areas.clear();
+            self.view.island_bell_hit_area = ratatui::layout::Rect::default();
             self.view.tab_scroll_left_hit_area = ratatui::layout::Rect::default();
             self.view.tab_scroll_right_hit_area = ratatui::layout::Rect::default();
             self.view.new_tab_hit_area = ratatui::layout::Rect::default();
             return;
         };
 
-        let layout = crate::ui::compute_tab_bar_view(
-            ws,
-            area,
-            self.tab_scroll,
-            self.tab_scroll_follow_active,
-            self.mouse_capture,
-        );
+        let layout = crate::ui::compute_tab_bar_view(self, area);
         self.tab_scroll = layout.scroll;
         self.view.tab_hit_areas = layout.tab_hit_areas;
+        self.view.island_marker_hit_areas = layout.island_marker_hit_areas;
+        self.view.island_bell_hit_area = layout.island_bell_hit_area;
         self.view.tab_scroll_left_hit_area = layout.scroll_left_hit_area;
         self.view.tab_scroll_right_hit_area = layout.scroll_right_hit_area;
         self.view.new_tab_hit_area = layout.new_tab_hit_area;

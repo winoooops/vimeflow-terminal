@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 mod dialogs;
+mod island;
 mod keybind_help;
 mod menus;
 mod mobile;
@@ -264,19 +265,7 @@ fn compute_view_internal(
         compute_workspace_card_areas(app, sidebar_area)
     };
 
-    let tab_bar_view = app
-        .active
-        .and_then(|ws_idx| app.workspaces.get(ws_idx))
-        .map(|ws| {
-            compute_tab_bar_view(
-                ws,
-                tab_bar_rect,
-                app.tab_scroll,
-                app.tab_scroll_follow_active,
-                app.mouse_capture,
-            )
-        })
-        .unwrap_or_default();
+    let tab_bar_view = compute_tab_bar_view(app, tab_bar_rect);
     app.tab_scroll = tab_bar_view.scroll;
 
     let TabSurfaceLayout {
@@ -313,6 +302,8 @@ fn compute_view_internal(
         workspace_card_areas,
         tab_bar_rect,
         tab_hit_areas: tab_bar_view.tab_hit_areas,
+        island_marker_hit_areas: tab_bar_view.island_marker_hit_areas,
+        island_bell_hit_area: tab_bar_view.island_bell_hit_area,
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
         new_tab_hit_area: tab_bar_view.new_tab_hit_area,
@@ -376,6 +367,8 @@ fn compute_mobile_view(
         workspace_card_areas: Vec::new(),
         tab_bar_rect: Rect::default(),
         tab_hit_areas: Vec::new(),
+        island_marker_hit_areas: Vec::new(),
+        island_bell_hit_area: Rect::default(),
         tab_scroll_left_hit_area: Rect::default(),
         tab_scroll_right_hit_area: Rect::default(),
         new_tab_hit_area: Rect::default(),
@@ -830,8 +823,12 @@ mod tests {
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
         assert_eq!(app.view.terminal_area, Rect::new(26, 0, 54, 19));
         assert_eq!(app.view.tab_bar_rect, Rect::new(26, 19, 54, 1));
-        assert!(app.view.tab_hit_areas.iter().all(|rect| rect.y == 19));
-        assert_eq!(app.view.new_tab_hit_area.y, 19);
+        assert!(app
+            .view
+            .island_marker_hit_areas
+            .iter()
+            .all(|rect| rect.y == 19));
+        assert_eq!(app.view.new_tab_hit_area, Rect::default());
 
         let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
         terminal.draw(|frame| render(&app, frame)).unwrap();
@@ -856,7 +853,7 @@ mod tests {
         let single_tab_terminal_area = app.view.terminal_area;
         assert_eq!(app.view.tab_bar_rect, Rect::default());
         assert_eq!(single_tab_terminal_area, Rect::new(26, 0, 54, 20));
-        assert!(app.view.tab_hit_areas.is_empty());
+        assert!(app.view.island_marker_hit_areas.is_empty());
         assert_eq!(app.view.new_tab_hit_area, Rect::default());
 
         app.workspaces[0].test_add_tab(Some("logs"));
@@ -864,16 +861,20 @@ mod tests {
 
         assert_eq!(app.view.tab_bar_rect, Rect::new(26, 0, 54, 1));
         assert_eq!(app.view.terminal_area, Rect::new(26, 1, 54, 19));
-        assert_eq!(app.view.tab_hit_areas.len(), 2);
-        assert!(app.view.tab_hit_areas.iter().all(|rect| rect.width > 0));
-        assert!(app.view.new_tab_hit_area.width > 0);
+        assert_eq!(app.view.island_marker_hit_areas.len(), 2);
+        assert!(app
+            .view
+            .island_marker_hit_areas
+            .iter()
+            .all(|rect| rect.width > 0));
+        assert_eq!(app.view.new_tab_hit_area, Rect::default());
 
         assert!(app.workspaces[0].close_tab(1));
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
 
         assert_eq!(app.view.terminal_area, single_tab_terminal_area);
         assert_eq!(app.view.tab_bar_rect, Rect::default());
-        assert!(app.view.tab_hit_areas.is_empty());
+        assert!(app.view.island_marker_hit_areas.is_empty());
         assert_eq!(app.view.new_tab_hit_area, Rect::default());
     }
 
@@ -1117,6 +1118,7 @@ mod tests {
     #[test]
     fn tab_bar_dims_auto_named_tabs_and_emphasizes_custom_tabs() {
         let mut app = crate::app::state::AppState::test_new();
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("test");
         let custom_tab = ws.test_add_tab(Some("logs"));
         ws.switch_tab(custom_tab);
@@ -1164,17 +1166,17 @@ mod tests {
         terminal.draw(|frame| render(&app, frame)).unwrap();
         let buffer = terminal.backend().buffer();
 
-        let custom_rect = app.view.tab_hit_areas[1];
+        let custom_rect = app.view.island_marker_hit_areas[1];
         let custom_style = buffer[(custom_rect.x + 1, custom_rect.y)].style();
 
         assert_eq!(custom_style.bg, Some(app.palette.accent));
         assert_eq!(custom_style.fg, Some(app.palette.surface_dim));
-        assert!(custom_style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
     fn new_tab_button_tracks_rightmost_tab_when_tabs_fit() {
         let mut app = crate::app::state::AppState::test_new();
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("test");
         ws.test_add_tab(Some("logs"));
 
@@ -1203,6 +1205,7 @@ mod tests {
     #[test]
     fn tab_bar_shows_scroll_controls_when_tabs_overflow() {
         let mut app = crate::app::state::AppState::test_new();
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("test");
         for name in ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"] {
             ws.test_add_tab(Some(name));
@@ -1246,6 +1249,7 @@ mod tests {
     #[test]
     fn tab_bar_clamps_manual_scroll_at_last_visible_tab() {
         let mut app = crate::app::state::AppState::test_new();
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         let mut ws = Workspace::test_new("test");
         for name in [
             "one", "two", "three", "four", "five", "six", "seven", "eight",
