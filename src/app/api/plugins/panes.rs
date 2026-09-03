@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use ratatui::layout::Direction;
 
 use super::super::responses::{encode_error, encode_success};
@@ -290,6 +292,11 @@ impl App {
             },
         );
         if let Some(tab_idx) = created_tab_idx {
+            if self.state.active == Some(ws_idx) {
+                // The inserted tab shifts island indices and page math under any
+                // in-flight animation; snap to settled like the tab API handlers.
+                self.clear_island_animation();
+            }
             if let Some(tab) = self.tab_info(ws_idx, tab_idx) {
                 self.emit_event(crate::api::schema::EventEnvelope {
                     event: crate::api::schema::EventKind::TabCreated,

@@ -34,6 +34,8 @@ Modified upstream files
 - src/app/input/sidebar.rs
 - src/app/api/layouts.rs
 - src/app/api/panes.rs
+- src/app/api/plugins/mod.rs
+- src/app/api/plugins/panes.rs
 - src/app/api/tabs.rs
 - src/app/state.rs
 - src/app/runtime.rs

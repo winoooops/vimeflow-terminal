@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 mod context;
 mod env;
 mod manifest;
@@ -1568,6 +1570,70 @@ command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \
         );
         assert_eq!(lines.next(), Some("unset"));
         assert_eq!(lines.next(), Some("unset"));
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn plugin_tab_open_clears_active_island_animation() {
+        let mut app = test_app();
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("plugin-island")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.island_anim = Some(crate::app::state::IslandAnim {
+            from_tab: 0,
+            to_tab: 1,
+            outgoing_width: crate::app::state::IslandSpring::new(3.0, 1.0),
+            incoming_width: crate::app::state::IslandSpring::new(3.0, 5.0),
+            capsule_total: crate::app::state::IslandSpring::new(6.0, 6.0),
+        });
+
+        let root = unique_temp_path("plugin-tab-island");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.tab"
+name = "Tab Plugin"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "board"
+title = "Plugin Board"
+command = ["sh", "-c", "sleep 5"]
+"#,
+        );
+        link_manifest(&mut app, &root);
+
+        let open = app.handle_api_request(Request {
+            id: "tab-open".into(),
+            method: Method::PluginPaneOpen(PluginPaneOpenParams {
+                plugin_id: "example.tab".into(),
+                entrypoint: "board".into(),
+                placement: Some(PluginPanePlacement::Tab),
+                width: None,
+                height: None,
+                workspace_id: None,
+                target_pane_id: None,
+                direction: None,
+                cwd: None,
+                focus: false,
+                env: std::collections::HashMap::new(),
+            }),
+        });
+        let ResponseResult::PluginPaneOpened { .. } = response_result(&open) else {
+            panic!("expected plugin pane opened response: {open}");
+        };
+        assert!(
+            app.state.island_anim.is_none(),
+            "plugin tab creation in the active workspace must clear the island animation"
+        );
 
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();

@@ -176,6 +176,8 @@ the top of the file:
 | `src/app/input/sidebar.rs` | Use card-aware body geometry for Agent hit testing and keep classic tab-drag tests on the classic renderer. | `158aabf9`, P5 gate fix (this commit), dynamic island capsule (this commit) |
 | `src/app/api/layouts.rs` | Clear island animation before applying API-driven layout replacements. | island motion (this commit) |
 | `src/app/api/panes.rs` | Route pane-label API mutations through the shared title ownership and event helper, and clear island animation on API pane moves. | `e006a1ea`, island motion (this commit) |
+| `src/app/api/plugins/mod.rs` | Cover the plugin-tab island-animation clear with a regression test. | island motion (this commit) |
+| `src/app/api/plugins/panes.rs` | Clear island animation when a plugin-created tab lands in the active workspace. | island motion (this commit) |
 | `src/app/api/tabs.rs` | Keep classic tab-bar reflow coverage on the upstream renderer after the island became the default. | dynamic island capsule (this commit), island motion (this commit) |
 | `src/app/state.rs` | Track title-sync generations, live Agents-card, compact-rail, and tab-island presentation state and hit geometry, plus non-blocking watcher telemetry snapshots. | `e006a1ea`, `b8a6406c`, `95a7db2a`, compact-rail numbers, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit) |
 | `src/app/runtime.rs` | Tick island springs and include their deadline in the monolithic run-loop scheduler. | island motion (this commit) |
