@@ -193,6 +193,11 @@ fn quantized_participant_widths(
     match display {
         IslandDisplayConfig::Dots | IslandDisplayConfig::Numbers => {
             let total = widths.total().round();
+            // Rapid onward retargets can catch both participants at their
+            // inactive width (e.g. two next-tab presses inside one tick), so
+            // the total cannot carry both participants' caps; report that so
+            // the caller cuts to a settled frame instead of clamping into a
+            // reversed range and panicking.
             let maximum = total - minimum;
             if maximum < minimum {
                 return None;
@@ -629,6 +634,12 @@ pub(crate) fn island_animation_for_tab_change(
         from_tab,
         to_tab,
         display: endpoints.display,
+        page_start: endpoints
+            .from
+            .markers
+            .first()
+            .map_or(0, |marker| marker.tab_idx),
+        page_len: endpoints.from.markers.len(),
         outgoing_width,
         incoming_width,
         capsule_total,
@@ -649,6 +660,19 @@ fn layout_animated(app: &AppState, area: Rect) -> Option<AnimatedIslandLayout> {
     // the endpoints fall back to dots) must not flip display modes on screen:
     // cut the animated overlay and render settled; the springs settle quietly.
     if endpoints.display != anim.display {
+        return None;
+    }
+    // Same for a resize that changes the page plan (markers leaving the page,
+    // the indicator appearing): the springs were tuned to the starting page's
+    // geometry, so render settled instead of jumping the capsule.
+    if endpoints
+        .from
+        .markers
+        .first()
+        .map_or(0, |marker| marker.tab_idx)
+        != anim.page_start
+        || endpoints.from.markers.len() != anim.page_len
+    {
         return None;
     }
     // The non-participant width (caps, conditional endpoint padding, other
@@ -1373,6 +1397,68 @@ mod tests {
     }
 
     #[test]
+    fn rapid_double_retarget_before_first_tick_cuts_instead_of_panicking() {
+        // Two next-tab presses inside one tick leave both participants at the
+        // inactive width, so round caps cannot fit on either side.
+        assert_eq!(
+            quantized_participant_widths(
+                IslandDisplayConfig::Dots,
+                IslandCapsConfig::Round,
+                ParticipantWidths::new(1.0, 1.0),
+            ),
+            None
+        );
+
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 1);
+        app.island.display = IslandDisplayConfig::Dots;
+        app.island.caps = IslandCapsConfig::Round;
+        app.island.motion = IslandMotionConfig::Smooth;
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        assert!(app.island_anim.is_some(), "first switch animates");
+        app.workspaces[0].switch_tab(2);
+        app.island_anim = island_animation_for_tab_change(&app, area, 1, 2);
+        assert!(
+            app.island_anim.is_none(),
+            "an under-width onward retarget is refused at creation"
+        );
+        // Rendering after the refused retarget must not panic.
+        let _ = rendered_buffer(&app, area);
+    }
+
+    #[test]
+    fn page_plan_change_on_resize_cuts_the_animated_overlay() {
+        let wide = Rect::new(0, 0, 60, 1);
+        let mut app = app_with_tabs(8, 1);
+        app.island.display = IslandDisplayConfig::Dots;
+        app.island.motion = IslandMotionConfig::Smooth;
+        app.island_anim = island_animation_for_tab_change(&app, wide, 0, 1);
+        let anim = app.island_anim.expect("animation");
+        assert!(
+            layout_animated(&app, wide).is_some(),
+            "unchanged geometry keeps animating"
+        );
+
+        // Narrowing shrinks the page: markers leave, the indicator appears,
+        // but both endpoints stay in the same block and the display stays
+        // dots — the page-plan guard must still cut the overlay.
+        let narrow = Rect::new(0, 0, 20, 1);
+        let narrow_endpoints = animation_endpoints(&app, narrow, 0, 1).expect("narrow endpoints");
+        assert_eq!(narrow_endpoints.display, IslandDisplayConfig::Dots);
+        assert!(
+            narrow_endpoints.from.markers.len() != anim.page_len
+                || narrow_endpoints
+                    .from
+                    .markers
+                    .first()
+                    .map_or(0, |marker| marker.tab_idx)
+                    != anim.page_start,
+            "fixture must change the page plan"
+        );
+        assert!(layout_animated(&app, narrow).is_none());
+    }
+
+    #[test]
     fn reset_tones_crossfade_via_theme_text_when_host_fg_is_unreported() {
         let area = Rect::new(0, 0, 80, 1);
         let mut app = animated_app(IslandDisplayConfig::Dots, IslandMotionConfig::Smooth, area);
@@ -1486,6 +1572,8 @@ mod tests {
             from_tab: 1,
             to_tab: 2,
             display: IslandDisplayConfig::Dots,
+            page_start: 0,
+            page_len: 3,
             outgoing_width: IslandSpring::new(5.0, 1.0),
             incoming_width: IslandSpring::new(1.0, 5.0),
             capsule_total: IslandSpring::new(6.0, 6.0),

@@ -1479,6 +1479,12 @@ pub(crate) struct IslandAnim {
     /// resize forcing the labels-to-dots fallback) cuts the animated overlay
     /// instead of flipping modes on screen.
     pub(crate) display: crate::config::IslandDisplayConfig,
+    /// First tab index and marker count of the page the animation started on.
+    /// A resize that changes the page plan mid-flight (markers leaving the
+    /// page, the indicator appearing) cuts the animated overlay instead of
+    /// jumping the capsule.
+    pub(crate) page_start: usize,
+    pub(crate) page_len: usize,
     pub(crate) outgoing_width: IslandSpring,
     pub(crate) incoming_width: IslandSpring,
     pub(crate) capsule_total: IslandSpring,

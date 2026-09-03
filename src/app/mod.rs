@@ -3292,6 +3292,8 @@ mod tests {
             from_tab: 0,
             to_tab: 1,
             display: crate::config::IslandDisplayConfig::Dots,
+            page_start: 0,
+            page_len: 2,
             outgoing_width: state::IslandSpring::new(5.0, 1.0),
             incoming_width: state::IslandSpring::new(1.0, 5.0),
             capsule_total: state::IslandSpring::new(6.0, 6.0),
