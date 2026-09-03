@@ -1067,12 +1067,32 @@ fn render_animated_layout(
         });
         Color::Rgb(r, g, b)
     };
+    // The accent fills the pill body's background, so a reset accent means the
+    // terminal's default background — resolve it with background semantics
+    // (host-reported background, then the theme's panel token, then the
+    // appearance-matched stock background) rather than the foreground chain.
+    let resolve_reset_accent = |color: Color| {
+        if color != Color::Reset {
+            return color;
+        }
+        if let Some(rgb) = host_theme.background {
+            return Color::Rgb(rgb.r, rgb.g, rgb.b);
+        }
+        if p.panel_bg != Color::Reset {
+            return p.panel_bg;
+        }
+        let (r, g, b) = stock_palette_channels(match app.host_terminal_appearance {
+            Some(crate::terminal_theme::HostAppearance::Light) => 15,
+            _ => 0,
+        });
+        Color::Rgb(r, g, b)
+    };
     let (outgoing_fill, incoming_fill) = if crossfade {
         (
             brighten(
                 lerp_hsl(
                     resolve_reset(outgoing_tone),
-                    resolve_reset(p.accent),
+                    resolve_reset_accent(p.accent),
                     animated.outgoing_activation,
                     host_theme,
                 ),
@@ -1082,7 +1102,7 @@ fn render_animated_layout(
             brighten(
                 lerp_hsl(
                     resolve_reset(incoming_tone),
-                    resolve_reset(p.accent),
+                    resolve_reset_accent(p.accent),
                     animated.incoming_activation,
                     host_theme,
                 ),
@@ -1536,6 +1556,49 @@ mod tests {
             buffer[(incoming.x, incoming.y)].style().fg,
             Some(expected),
             "an all-reset theme still blends via the stock foreground"
+        );
+    }
+
+    #[test]
+    fn reset_accent_blends_with_background_semantics() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = animated_app(IslandDisplayConfig::Dots, IslandMotionConfig::Smooth, area);
+        app.palette.accent = Color::Reset;
+        let host_bg = crate::terminal_theme::RgbColor {
+            r: 10,
+            g: 10,
+            b: 40,
+        };
+        app.host_terminal_theme.background = Some(host_bg);
+        // A reported foreground must NOT hijack the accent's resolution.
+        app.host_terminal_theme.foreground = Some(crate::terminal_theme::RgbColor {
+            r: 240,
+            g: 240,
+            b: 240,
+        });
+        set_spring_frame(&mut app, 3.4, 2.6, 6.0, -20.0, 20.0);
+        let animated = layout_animated(&app, area).expect("animated layout");
+        let anim = app.island_anim.expect("animation state");
+        let incoming =
+            animated_participant_rect(&app, &animated, anim.to_tab, animated.widths.incoming)
+                .expect("incoming participant");
+        let buffer = rendered_buffer(&app, area);
+        let host_theme = &app.host_terminal_theme;
+        let expected = brighten(
+            lerp_hsl(
+                positional_fg(&app, anim.to_tab, anim.from_tab),
+                Color::Rgb(host_bg.r, host_bg.g, host_bg.b),
+                animated.incoming_activation,
+                host_theme,
+            ),
+            animated.incoming_velocity,
+            host_theme,
+        );
+        assert!(matches!(expected, Color::Rgb(..)));
+        assert_eq!(
+            buffer[(incoming.x, incoming.y)].style().fg,
+            Some(expected),
+            "a reset accent blends toward the host default background, not the foreground"
         );
     }
 

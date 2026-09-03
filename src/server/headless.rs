@@ -1143,6 +1143,18 @@ impl HeadlessServer {
     }
 
     fn sync_foreground_client_state(&mut self) {
+        let previous_effective_size = self.effective_size;
+        self.sync_foreground_client_state_inner();
+        if self.effective_size != previous_effective_size {
+            // Every effective-size change — client resize, promotion, connect,
+            // or removal — invalidates in-flight island geometry (page plans
+            // and label pagination reflow), so snap the animation here at the
+            // single choke point instead of per event.
+            self.app.clear_island_animation();
+        }
+    }
+
+    fn sync_foreground_client_state_inner(&mut self) {
         let Some(client_id) = self.foreground_client_id else {
             self.effective_size = (MIN_COLS, MIN_ROWS);
             self.app.state.outer_terminal_focus = None;
@@ -3078,7 +3090,6 @@ impl HeadlessServer {
                     render_state.request_repaint();
                     return true;
                 }
-                self.app.clear_island_animation();
                 if let Some(client) = self.clients.get_mut(&client_id) {
                     client.terminal_size = (cols, rows);
                     client.cell_size = crate::kitty_graphics::HostCellSize {
