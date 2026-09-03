@@ -192,9 +192,30 @@ a registered fork-modified file. Nothing else about layout changes.
     same round language; bare digits remain only under square caps.
     Active = ` N ` (one-space padding) on accent bg with caps as
     everywhere.
-  - `labels`: inactive = the same `⬤` as dots mode (round caps) or `●`
-    (square); active = ` name ` (one-space padding) on
-    accent bg, total width `clamp(3, 16)` cells via `truncate_end`.
+  - `labels` (amended 2026-09-03, operator decision): **every tab shows
+    its name** — the full labeled bar. Inactive = the tab's display name
+    (custom name, else the index as upstream's default text), truncated
+    to fit `LABEL_MAX_WIDTH`, in the positional tone; under round caps it
+    wears the same mini-stadium as numbers-inactive (cap + name + cap on
+    the muted token bg), under square caps bare text. Active = ` name `
+    (one-space padding) on accent bg, total width `clamp(3, 16)` cells
+    via `truncate_end`, index fallback when unnamed. The previous compact
+    labels look is **retired**, closely approximated (not byte-identical:
+    the circle stays in the pill, and unnamed fallbacks differ) by
+    `dots` + `active_title` — a deliberate trade, no escape-hatch key.
+    **Pagination does not change**: `marker_budget` takes
+    `active.max(inactive)` and labels' active `LABEL_MAX_WIDTH` already
+    dominates, so page math was label-bar-conservative all along; the
+    inactive branch's stale `1` merely becomes semantically moot.
+    **Inactive label stadiums follow numbers-inactive exactly**: the same
+    muted-token mini-stadium, the same zero-padding cap nesting against
+    the capsule edge, and the settled + animated `inactive_number_stadium`
+    predicates generalize to cover labels. **The narrow-width dots
+    fallback remains** as the explicit exception: when the labeled
+    endpoints cannot share a page (settled layout or motion endpoints),
+    the existing labels-to-dots degradation applies rather than the bar
+    vanishing. Motion, endpoints, and hit areas otherwise need no model
+    change: marker widths already flow from measured layout text.
   - Capsule padding under round caps is **per-side conditional**
     (amended 2026-09-01 after the flush look): **0** on a side whose
     adjacent element is the active pill's cap — curves nest — and **1**
@@ -313,6 +334,65 @@ endpoints plus capped mid-frames; the no-rect frame sweep;
 hit-areas-snap-immediately; `off` byte-identical; steps-mode coverage;
 topology clears (tab create/close/reorder, `layout.apply`, `pane.move`).
 
+### Active tab title (amended 2026-09-03 — the next slice)
+
+The active pill in `dots` and `numbers` displays carries the tab's title
+text beside its identity mark, converging on the treatment `labels`
+already gives its active tab while keeping each mode's inactive identity
+untouched.
+
+- **Composition** (amended after operator decision, 2026-09-03): dots:
+  `␣⬤␣title␣` — the circle glyph rendered in `panel_contrast_fg` on the
+  accent run, so the mode's shape language stays visible inside the pill.
+  numbers: `␣title␣` — the title **replaces** the index entirely, never
+  `␣N␣title␣`: upstream herdr's index is nothing but the default text an
+  unnamed tab falls back to, so a real name supersedes it (the unnamed
+  fallback below preserves that original logic exactly). Inactive markers
+  are unchanged in both modes. `labels` display ignores the key — it
+  already titles the active tab and shows no mark.
+- **Title source and fallback**: `tab.custom_name` directly — the tab's
+  stored name, whether user-set (rename, `tab.create` label, worktree
+  label) or auto-assigned, and **nullable**. NOT `tab_display_name`,
+  whose index-string fallback would render the explicitly rejected
+  degenerate `2 2` in numbers. `None` renders exactly today's untitled
+  form (`␣␣␣` solid run / `␣N␣`); the mark already identifies the tab.
+- **Width budget**: the whole active pill (mark, spaces, title, padding,
+  before caps) clamps to the existing `LABEL_MAX_WIDTH = 16` via
+  `truncate_end`, minimum the current untitled width. `marker_budget`
+  currently budgets the dots active at 3 and numbers at `digits + 2`;
+  with `active_title` on, **both modes budget the active at
+  `LABEL_MAX_WIDTH`** (the labels rule) so the stable-input page math
+  never admits more markers than the titled pill leaves room for — the
+  cost is labels-equivalent pagination, never an island that overflows or
+  vanishes. On rows too narrow for any title, truncation walks the title
+  down and the pill bottoms out at its untitled form rather than forcing
+  a different page plan.
+- **Motion interplay**: endpoints derive from layouts, so the incoming
+  pill's spring targets the titled width and the outgoing shrinks from
+  it. This **retires the dots/numbers width-conservation property**: with
+  per-tab title widths the settled totals differ between endpoints, so
+  titled dots/numbers breathe through the capsule tween exactly like
+  labels (the Motion section's conserved-total fallback chain already
+  handles the equal-width special case). Mid-flight content keeps the
+  existing >60%-activation gate (`animated_content_visible`);
+  `render_animated_content` drops its dots early-return so a titled dots
+  pill draws its content the same way numbers and labels do.
+- **Title changes without a tab switch** snap, never stretch: every
+  `custom_name` mutation on the active workspace (rename API, TUI rename
+  modal, worktree label flows) refreshes the tab bar view and clears any
+  in-flight animation whenever the island is actually rendering titles —
+  the existing labels-only rename guard widens to
+  `display == labels || active_title`. Same rationale as the rename rule:
+  springs must not settle against pre-change widths.
+- **Config**: `[ui.island] active_title = true` (default) `| false`,
+  live-reloadable; the existing island-config-change clear already snaps
+  any in-flight animation when it flips. Because a derived
+  `IslandConfig::default()` would give a bare bool `false`, the field
+  needs an explicit `#[serde(default = ...)] = true` (plus matching
+  `Default` impl) and an absent-key test asserting it parses to `true`.
+  `false` restores the pure-solid pill and bare `␣N␣` exactly.
+- **Hit areas**: automatic — marker hit rects come from layout widths.
+
 ### Hit areas and input
 
 - `TabBarView` gains island fields computed in `compute_tab_bar_view`:
@@ -334,7 +414,11 @@ positioning; positional three-tone assignment around the active index;
 batching at 11+ tabs; `classic` byte-identical to today's output;
 `hide_tab_bar_when_single_tab` matrix per decision 8; hit-area geometry
 tests beside the existing `TabBarView` tests; live config flips for
-`tab_bar_style`, `island.position`, `island.display`.
+`tab_bar_style`, `island.position`, `island.display`. Active-title slice:
+marker composition per mode (titled, untitled fallback, truncation at the
+16-cell clamp), page math with a widened active pill, the dots
+animated-content gate, and the `active_title` live flip restoring the
+untitled forms byte-identically.
 
 ## 6. Notifications v1 design (M2b)
 
@@ -462,6 +546,7 @@ position = "center"        # "center" | "left"
 display  = "dots"          # "dots" | "numbers" | "labels"
 caps     = "round"         # "round" | "square"  (silhouette; round = powerline semicircles)
 motion   = "smooth"        # "smooth" | "steps" | "off"  (within-page tab-switch morph)
+active_title = true        # show the tab title beside the active mark (dots/numbers)
 arrivals = "toast"         # "toast" | "silent"        (M2b)
 bell     = "!"             # 1-2 cell string override  (M2b)
 ```
