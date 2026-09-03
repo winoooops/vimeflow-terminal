@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use std::path::PathBuf;
 
 use ratatui::layout::Direction;
@@ -32,6 +34,10 @@ impl App {
     }
 
     pub(super) fn handle_layout_apply(&mut self, id: String, params: LayoutApplyParams) -> String {
+        // Layout application restructures tab topology; an in-flight island
+        // animation would address stale tab indices (spec: clear on any
+        // topology change). Over-clearing on a failed call is a harmless snap.
+        self.clear_island_animation();
         let replace_target = match params.tab_id.as_deref() {
             Some(tab_id) => match self.parse_tab_id(tab_id) {
                 Some(target) => Some(target),

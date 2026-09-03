@@ -36,7 +36,7 @@ use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const MIN_RENDER_INTERVAL: Duration = Duration::from_millis(16);
+pub(crate) const MIN_RENDER_INTERVAL: Duration = Duration::from_millis(16);
 pub(crate) const SELECTION_AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(30);
 const RESIZE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const GIT_REMOTE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_millis(1500);
@@ -140,6 +140,7 @@ pub struct App {
     pub(crate) detached_custom_command_children: Vec<std::process::Child>,
     pub(crate) persist_pane_history: bool,
     pub(crate) last_render_at: Option<Instant>,
+    next_island_animation_tick: Option<Instant>,
     pub(crate) input_leases: input::InputLeaseTable,
     pub render_notify: Arc<Notify>,
     pub(crate) render_dirty: Arc<crate::render_signal::RenderSignal>,
@@ -365,6 +366,46 @@ fn resolve_effective_theme(
 }
 
 impl App {
+    pub(crate) fn clear_island_animation(&mut self) {
+        self.state.island_anim = None;
+        self.next_island_animation_tick = None;
+    }
+
+    pub(crate) fn tick_island_animation(&mut self, now: Instant) -> bool {
+        if self.state.island.motion == crate::config::IslandMotionConfig::Off {
+            let had_animation = self.state.island_anim.is_some();
+            self.clear_island_animation();
+            return had_animation;
+        }
+        if self.state.island_anim.is_none() {
+            self.next_island_animation_tick = None;
+            return false;
+        }
+        let Some(deadline) = self.next_island_animation_tick else {
+            self.next_island_animation_tick = Some(now + MIN_RENDER_INTERVAL);
+            return false;
+        };
+        if now < deadline {
+            return false;
+        }
+        self.next_island_animation_tick = Some(now + MIN_RENDER_INTERVAL);
+        let Some(anim) = self.state.island_anim.as_mut() else {
+            return false;
+        };
+        let dt = MIN_RENDER_INTERVAL.as_secs_f32();
+        anim.outgoing_width.step(dt);
+        anim.incoming_width.step(dt);
+        anim.capsule_total.step(dt);
+        if anim.is_settled() {
+            self.clear_island_animation();
+        }
+        true
+    }
+
+    pub(crate) fn island_animation_tick_deadline(&self) -> Option<Instant> {
+        self.next_island_animation_tick
+    }
+
     pub fn new(
         config: &Config,
         no_session: bool,
@@ -653,6 +694,7 @@ impl App {
             tab_bar_position: config.ui.tab_bar_position,
             tab_bar_style: config.ui.tab_bar_style,
             island: config.ui.island,
+            island_anim: None,
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
@@ -776,6 +818,7 @@ impl App {
             selection_highlight_clear_deadline: None,
             persist_pane_history: config.experimental.pane_history,
             last_render_at: None,
+            next_island_animation_tick: None,
             input_leases: input::InputLeaseTable::default(),
             api_rx,
             event_hub,
@@ -1463,6 +1506,11 @@ impl App {
                     config.ui.show_agent_labels_on_pane_borders;
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.tab_bar_position = config.ui.tab_bar_position;
+                if self.state.tab_bar_style != config.ui.tab_bar_style
+                    || self.state.island != config.ui.island
+                {
+                    self.clear_island_animation();
+                }
                 self.state.tab_bar_style = config.ui.tab_bar_style;
                 self.state.island = config.ui.island;
                 self.state.agent_panel_sort =
@@ -3189,10 +3237,15 @@ mod tests {
             app.state.island.display,
             crate::config::IslandDisplayConfig::Dots
         );
+        assert_eq!(
+            app.state.island.motion,
+            crate::config::IslandMotionConfig::Smooth
+        );
 
         config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         config.ui.island.position = crate::config::IslandPositionConfig::Left;
         config.ui.island.display = crate::config::IslandDisplayConfig::Labels;
+        config.ui.island.motion = crate::config::IslandMotionConfig::Off;
         app.apply_live_config(&config, &[], &[], false);
         assert_eq!(
             app.state.tab_bar_style,
@@ -3206,10 +3259,15 @@ mod tests {
             app.state.island.display,
             crate::config::IslandDisplayConfig::Labels
         );
+        assert_eq!(
+            app.state.island.motion,
+            crate::config::IslandMotionConfig::Off
+        );
 
         config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Island;
         config.ui.island.position = crate::config::IslandPositionConfig::Center;
         config.ui.island.display = crate::config::IslandDisplayConfig::Dots;
+        config.ui.island.motion = crate::config::IslandMotionConfig::Steps;
         app.apply_live_config(&config, &[], &[], false);
         assert_eq!(
             app.state.tab_bar_style,
@@ -3223,6 +3281,82 @@ mod tests {
             app.state.island.display,
             crate::config::IslandDisplayConfig::Dots
         );
+        assert_eq!(
+            app.state.island.motion,
+            crate::config::IslandMotionConfig::Steps
+        );
+    }
+
+    fn test_island_anim() -> state::IslandAnim {
+        state::IslandAnim {
+            from_tab: 0,
+            to_tab: 1,
+            outgoing_width: state::IslandSpring::new(5.0, 1.0),
+            incoming_width: state::IslandSpring::new(1.0, 5.0),
+            capsule_total: state::IslandSpring::new(6.0, 6.0),
+        }
+    }
+
+    #[test]
+    fn live_island_presentation_changes_clear_motion() {
+        let mut app = test_app();
+        let mut config = Config::default();
+        let anim = test_island_anim();
+
+        app.state.island_anim = Some(anim);
+        config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
+        app.apply_live_config(&config, &[], &[], false);
+        assert!(app.state.island_anim.is_none());
+
+        config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        app.apply_live_config(&config, &[], &[], false);
+        app.state.island_anim = Some(anim);
+        config.ui.island.position = crate::config::IslandPositionConfig::Left;
+        app.apply_live_config(&config, &[], &[], false);
+        assert!(app.state.island_anim.is_none());
+    }
+
+    #[test]
+    fn island_animation_tick_advances_springs_and_expires() {
+        let mut app = test_app();
+        app.state.island_anim = Some(test_island_anim());
+        let mut incoming_positions = Vec::new();
+        let tick_origin = Instant::now();
+
+        assert!(!app.tick_island_animation(tick_origin));
+        for tick in 1..20 {
+            assert!(app.tick_island_animation(tick_origin + MIN_RENDER_INTERVAL * tick));
+            let Some(anim) = app.state.island_anim else {
+                break;
+            };
+            incoming_positions.push(anim.incoming_width.position);
+        }
+
+        assert!(incoming_positions.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(app.state.island_anim.is_none());
+    }
+
+    #[test]
+    fn island_animation_tick_requests_render_when_rounded_width_is_unchanged() {
+        let mut app = test_app();
+        app.state.island.motion = crate::config::IslandMotionConfig::Steps;
+        app.state.island_anim = Some(test_island_anim());
+        let mut saw_unchanged_width = false;
+        let tick_origin = Instant::now();
+        let mut tick = 0;
+
+        assert!(!app.tick_island_animation(tick_origin));
+        while let Some(before) = app.state.island_anim {
+            tick += 1;
+            assert!(app.tick_island_animation(tick_origin + MIN_RENDER_INTERVAL * tick));
+            let Some(after) = app.state.island_anim else {
+                break;
+            };
+            saw_unchanged_width |=
+                before.outgoing_width.position.round() == after.outgoing_width.position.round();
+        }
+
+        assert!(saw_unchanged_width);
     }
 
     #[test]

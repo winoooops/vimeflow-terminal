@@ -119,6 +119,9 @@ impl App {
                     self.state.switch_workspace_tab(ws_idx, tab_idx);
                     self.state.mode = Mode::Terminal;
                 }
+                if self.state.active == Some(ws_idx) {
+                    self.clear_island_animation();
+                }
                 self.schedule_session_save();
                 self.emit_tab_created_events(ws_idx, tab_idx);
                 encode_success(
@@ -209,6 +212,7 @@ impl App {
         if moved {
             self.schedule_session_save();
             if self.state.active == Some(ws_idx) {
+                self.clear_island_animation();
                 self.state.tab_scroll_follow_active = true;
                 self.state.refresh_tab_bar_view();
             }
@@ -254,6 +258,9 @@ impl App {
                 );
             }
             let workspace = self.workspace_info(ws_idx);
+            if self.state.active == Some(ws_idx) {
+                self.clear_island_animation();
+            }
             self.state.selected = ws_idx;
             self.state.close_selected_workspace();
             self.state.remove_plugin_pane_records(pane_ids);
@@ -284,6 +291,9 @@ impl App {
                 "tab_close_failed",
                 format!("tab {} could not be closed", target.tab_id),
             );
+        }
+        if self.state.active == Some(ws_idx) {
+            self.clear_island_animation();
         }
         self.state.remove_plugin_pane_records(pane_ids);
         self.state.remove_unattached_terminal_ids(terminal_ids);
@@ -331,9 +341,60 @@ mod tests {
     use super::*;
     use crate::{
         api::schema::SuccessResponse,
+        app::state::{IslandAnim, IslandSpring},
         config::{Config, ShellModeConfig},
         workspace::Workspace,
     };
+
+    fn island_anim() -> IslandAnim {
+        IslandAnim {
+            from_tab: 0,
+            to_tab: 1,
+            outgoing_width: IslandSpring::new(3.0, 1.0),
+            incoming_width: IslandSpring::new(3.0, 5.0),
+            capsule_total: IslandSpring::new(6.0, 6.0),
+        }
+    }
+
+    #[test]
+    fn api_layout_apply_clears_island_animation_up_front() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        app.state.workspaces = vec![Workspace::test_new("tabs")];
+        app.state.active = Some(0);
+        app.state.island_anim = Some(island_anim());
+
+        // Layout application is a topology change; the animation must clear
+        // even on a failing call (the clear is deliberately up front).
+        let params: crate::api::schema::LayoutApplyParams = serde_json::from_value(
+            serde_json::json!({ "workspace_id": "w999", "root": { "type": "pane" } }),
+        )
+        .expect("layout apply params");
+        let _ = app.handle_layout_apply("req".into(), params);
+
+        assert!(app.state.island_anim.is_none());
+    }
+
+    #[test]
+    fn api_pane_move_clears_island_animation_up_front() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        app.state.workspaces = vec![Workspace::test_new("tabs")];
+        app.state.active = Some(0);
+        app.state.island_anim = Some(island_anim());
+
+        let params: crate::api::schema::PaneMoveParams =
+            serde_json::from_value(serde_json::json!({
+                "pane_id": "w999:p1",
+                "destination": { "type": "tab", "tab_id": "w999:t1", "split": "right" }
+            }))
+            .expect("pane move params");
+        let _ = app.handle_pane_move("req".into(), params);
+
+        assert!(app.state.island_anim.is_none());
+    }
 
     #[test]
     fn api_tab_close_last_tab_closes_workspace_and_emits_both_events() {
@@ -343,6 +404,7 @@ mod tests {
         app.state.workspaces = vec![Workspace::test_new("tabs")];
         app.state.active = Some(0);
         app.state.selected = 0;
+        app.state.island_anim = Some(island_anim());
         let tab_id = app.public_tab_id(0, 0).unwrap();
         let workspace_id = app.public_workspace_id(0);
 
@@ -357,6 +419,7 @@ mod tests {
         assert_eq!(success.result, ResponseResult::Ok {});
         assert!(app.state.workspaces.is_empty());
         assert!(app.state.active.is_none());
+        assert!(app.state.island_anim.is_none());
         let events = event_hub.events_after(0);
         assert_eq!(
             events
@@ -383,6 +446,30 @@ mod tests {
     }
 
     #[test]
+    fn api_tab_close_clears_active_island_animation() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let mut workspace = Workspace::test_new("tabs");
+        workspace.test_add_tab(Some("two"));
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.island_anim = Some(island_anim());
+        let tab_id = app.public_tab_id(0, 1).unwrap();
+
+        let response = app.handle_tab_close("req".into(), TabTarget { tab_id });
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        assert!(app.state.island_anim.is_none());
+    }
+
+    #[test]
     fn api_tab_move_reorders_tabs_in_target_workspace() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -393,6 +480,7 @@ mod tests {
         app.state.workspaces = vec![workspace];
         app.state.active = Some(0);
         app.state.selected = 0;
+        app.state.island_anim = Some(island_anim());
         let moved_root = app.state.workspaces[0].tabs[0].root_pane;
         let moved_id = app.public_tab_id(0, 0).unwrap();
 
@@ -409,6 +497,7 @@ mod tests {
             panic!("expected tab list");
         };
         assert_eq!(app.state.workspaces[0].tabs[2].root_pane, moved_root);
+        assert!(app.state.island_anim.is_none());
         assert_eq!(tabs[2].tab_id, app.public_tab_id(0, 2).unwrap());
         let events = event_hub.events_after(0);
         assert!(events.iter().any(|(_, event)| {
@@ -470,6 +559,7 @@ mod tests {
         app.state.workspaces = vec![workspace];
         app.state.active = Some(0);
         app.state.selected = 0;
+        app.state.island_anim = Some(island_anim());
         app.state.ensure_test_terminals();
         let cached_cwd = std::env::temp_dir();
         let terminal_id = app.state.workspaces[0]
@@ -491,6 +581,7 @@ mod tests {
 
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert!(matches!(success.result, ResponseResult::TabCreated { .. }));
+        assert!(app.state.island_anim.is_none());
         let created = &app.state.workspaces[0].tabs[1];
         let created_terminal_id = created.terminal_id(created.root_pane).unwrap();
         let created_cwd = &app.state.terminals.get(created_terminal_id).unwrap().cwd;

@@ -802,15 +802,18 @@ impl HeadlessServer {
             }
 
             // 8. Wait for next event.
-            let next_deadline = self
-                .app
-                .next_headless_loop_deadline_with_git_refresh(
+            let next_deadline = [
+                self.app.next_headless_loop_deadline_with_git_refresh(
                     now,
                     needs_render,
                     self.has_app_client(),
-                )
-                .map(|deadline| deadline.min(now + CLIENT_ACCEPT_POLL_INTERVAL))
-                .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
+                ),
+                self.app.island_animation_tick_deadline(),
+                Some(now + CLIENT_ACCEPT_POLL_INTERVAL),
+            ]
+            .into_iter()
+            .flatten()
+            .min();
             let next_deadline = self
                 .pending_alt_screen_reads
                 .iter()
@@ -4383,7 +4386,7 @@ impl HeadlessServer {
     /// Similar to `App::handle_scheduled_tasks` but without resize polling
     /// (the server doesn't have a terminal to resize).
     fn handle_scheduled_tasks_headless(&mut self, now: Instant, geometry_dirty: bool) -> bool {
-        let mut changed = false;
+        let mut changed = self.app.tick_island_animation(now);
 
         // No resize polling needed — server has no terminal.
         // Client resize messages drive size changes instead.

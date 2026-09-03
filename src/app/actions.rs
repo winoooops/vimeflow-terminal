@@ -1116,6 +1116,9 @@ impl AppState {
 
     pub fn switch_workspace(&mut self, idx: usize) {
         if idx < self.workspaces.len() {
+            if self.active != Some(idx) {
+                self.island_anim = None;
+            }
             let previous_focus = self.current_pane_focus_target();
             self.active = Some(idx);
             self.selected = idx;
@@ -1149,8 +1152,31 @@ impl AppState {
             return false;
         }
 
-        let previous_focus = self.current_pane_focus_target();
         let workspace_changed = self.active != Some(ws_idx);
+        let from_tab = self.workspaces[ws_idx].active_tab;
+        let marker_is_visible = |tab_idx: usize| {
+            self.view
+                .island_marker_hit_areas
+                .get(tab_idx)
+                .is_some_and(|rect| rect.width > 0)
+        };
+        let should_animate = !workspace_changed
+            && from_tab != tab_idx
+            && self.tab_bar_style == crate::config::TabBarStyleConfig::Island
+            && self.island.motion != crate::config::IslandMotionConfig::Off
+            && marker_is_visible(from_tab)
+            && marker_is_visible(tab_idx);
+        let next_island_anim = if should_animate {
+            crate::ui::island_animation_for_tab_change(
+                self,
+                self.view.tab_bar_rect,
+                from_tab,
+                tab_idx,
+            )
+        } else {
+            None
+        };
+        let previous_focus = self.current_pane_focus_target();
         self.active = Some(ws_idx);
         self.selected = ws_idx;
         let workspace_id = self.workspaces[ws_idx].id.clone();
@@ -1164,6 +1190,11 @@ impl AppState {
             let tab_id =
                 public_tab_id_for_index(ws, tab_idx).unwrap_or_else(|| workspace_id.clone());
             crate::logging::tab_focused(&workspace_id, &tab_id);
+        }
+        if workspace_changed {
+            self.island_anim = None;
+        } else if from_tab != tab_idx {
+            self.island_anim = next_island_anim;
         }
         self.tab_scroll_follow_active = true;
         self.refresh_tab_bar_view();
@@ -1254,19 +1285,7 @@ impl AppState {
     #[cfg(test)]
     pub fn switch_tab(&mut self, idx: usize) {
         if let Some(ws_idx) = self.active {
-            let previous_focus = self.current_pane_focus_target();
-            let Some(ws) = self.workspaces.get_mut(ws_idx) else {
-                return;
-            };
-            ws.switch_tab(idx);
-            let workspace_id = ws.id.clone();
-            let tab_id = public_tab_id_for_index(ws, idx).unwrap_or_else(|| workspace_id.clone());
-            crate::logging::tab_focused(&workspace_id, &tab_id);
-            self.mark_session_dirty();
-            self.tab_scroll_follow_active = true;
-            self.refresh_tab_bar_view();
-            self.record_pane_focus_after_navigation(previous_focus);
-            self.sync_selection_after_focus_navigation();
+            self.switch_workspace_tab(ws_idx, idx);
         }
     }
 
@@ -1693,6 +1712,12 @@ impl AppState {
             })
             .filter(|indices| indices.len() >= 2)
             .unwrap_or_else(|| vec![self.selected]);
+        if self
+            .active
+            .is_some_and(|active| close_indices.contains(&active))
+        {
+            self.island_anim = None;
+        }
 
         let mut terminal_ids = Vec::new();
         let mut pane_ids = Vec::new();
@@ -3334,10 +3359,14 @@ impl AppState {
         self.pane_id_aliases.retain(|_, alias| *alias != pane_id);
         self.public_pane_id_aliases
             .retain(|_, alias| *alias != pane_id);
+        let tab_count_before = self.workspaces[ws_idx].tabs.len();
         let should_close_workspace = {
             let ws = &mut self.workspaces[ws_idx];
             ws.remove_pane(pane_id)
         };
+        if self.active == Some(ws_idx) && self.workspaces[ws_idx].tabs.len() != tab_count_before {
+            self.island_anim = None;
+        }
         self.mark_session_dirty();
 
         if should_close_workspace {
@@ -3392,9 +3421,10 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::state::{IslandAnim, IslandSpring};
     use crate::detect::{Agent, AgentState};
     use crate::workspace::Workspace;
-    use ratatui::layout::Direction;
+    use ratatui::layout::{Direction, Rect};
 
     fn app_with_workspaces(names: &[&str]) -> AppState {
         let mut state = AppState::test_new();
@@ -3409,6 +3439,26 @@ mod tests {
             state.mode = Mode::Terminal;
         }
         state
+    }
+
+    fn island_motion_state() -> AppState {
+        let mut state = app_with_workspaces(&["island"]);
+        for idx in 1..11 {
+            state.workspaces[0].test_add_tab(Some(&format!("tab-{idx}")));
+        }
+        state.view.tab_bar_rect = Rect::new(0, 0, 60, 1);
+        state.refresh_tab_bar_view();
+        state
+    }
+
+    fn test_island_anim(from_tab: usize, to_tab: usize) -> IslandAnim {
+        IslandAnim {
+            from_tab,
+            to_tab,
+            outgoing_width: IslandSpring::new(5.0, 1.0),
+            incoming_width: IslandSpring::new(1.0, 5.0),
+            capsule_total: IslandSpring::new(6.0, 6.0),
+        }
     }
 
     fn insert_test_pane_graphics_layer(state: &mut AppState, pane_id: PaneId) {
@@ -4359,6 +4409,92 @@ mod tests {
         state.switch_workspace(2);
         assert_eq!(state.active, Some(2));
         assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn island_motion_triggers_for_same_page_tab_changes() {
+        let mut state = island_motion_state();
+
+        assert!(state.switch_workspace_tab(0, 1));
+
+        let anim = state.island_anim.expect("island animation");
+        assert_eq!((anim.from_tab, anim.to_tab), (0, 1));
+        assert_eq!(
+            (anim.outgoing_width.position, anim.outgoing_width.target),
+            (5.0, 1.0)
+        );
+        assert_eq!(
+            (anim.incoming_width.position, anim.incoming_width.target),
+            (1.0, 5.0)
+        );
+    }
+
+    #[test]
+    fn island_motion_retargets_live_springs_with_velocity() {
+        let mut state = island_motion_state();
+        assert!(state.switch_workspace_tab(0, 1));
+        let mut first = state.island_anim.expect("first animation");
+        first.outgoing_width.position = 2.0;
+        first.outgoing_width.velocity = -7.0;
+        first.incoming_width.position = 4.0;
+        first.incoming_width.velocity = 7.0;
+        first.capsule_total.velocity = 2.0;
+        state.island_anim = Some(first);
+
+        assert!(state.switch_workspace_tab(0, 2));
+
+        let retargeted = state.island_anim.expect("retargeted animation");
+        assert_eq!((retargeted.from_tab, retargeted.to_tab), (1, 2));
+        assert_eq!(
+            (
+                retargeted.outgoing_width.position,
+                retargeted.outgoing_width.velocity,
+                retargeted.outgoing_width.target,
+            ),
+            (4.0, 7.0, 1.0)
+        );
+        assert_eq!(
+            (
+                retargeted.incoming_width.position,
+                retargeted.incoming_width.velocity,
+                retargeted.incoming_width.target,
+            ),
+            (2.0, -7.0, 5.0)
+        );
+        assert_eq!(retargeted.capsule_total.velocity, 2.0);
+    }
+
+    #[test]
+    fn island_motion_skips_off_classic_and_same_tab() {
+        let mut off = island_motion_state();
+        off.island.motion = crate::config::IslandMotionConfig::Off;
+        assert!(off.switch_workspace_tab(0, 1));
+        assert!(off.island_anim.is_none());
+
+        let mut classic = island_motion_state();
+        classic.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
+        assert!(classic.switch_workspace_tab(0, 1));
+        assert!(classic.island_anim.is_none());
+
+        let mut same_tab = island_motion_state();
+        let existing = test_island_anim(0, 1);
+        same_tab.island_anim = Some(existing);
+        assert!(same_tab.switch_workspace_tab(0, 0));
+        assert_eq!(same_tab.island_anim, Some(existing));
+    }
+
+    #[test]
+    fn island_motion_clears_on_page_or_workspace_change() {
+        let mut state = island_motion_state();
+        state.island_anim = Some(test_island_anim(0, 1));
+
+        assert!(state.switch_workspace_tab(0, 10));
+        assert!(state.island_anim.is_none());
+
+        state.workspaces.push(Workspace::test_new("other"));
+        state.island_anim = Some(test_island_anim(10, 9));
+        state.switch_workspace(1);
+        assert!(state.island_anim.is_none());
     }
 
     #[test]

@@ -791,6 +791,17 @@
           ]
         },
         {
+          "key": "ui.island.motion",
+          "type": "\"smooth\" | \"steps\" | \"off\"",
+          "default": "\"smooth\"",
+          "description": "Animate within-page tab changes smoothly, in whole-cell steps, or disable motion. Reloads live.",
+          "values": [
+            "smooth",
+            "steps",
+            "off"
+          ]
+        },
+        {
           "key": "ui.agent_panel_sort",
           "type": "enum",
           "default": "\"spaces\"",

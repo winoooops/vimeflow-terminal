@@ -32,9 +32,11 @@ Modified upstream files
 - src/app/input/mouse.rs
 - src/app/input/navigate.rs
 - src/app/input/sidebar.rs
+- src/app/api/layouts.rs
 - src/app/api/panes.rs
 - src/app/api/tabs.rs
 - src/app/state.rs
+- src/app/runtime.rs
 - src/api/schema/tests.rs
 - src/config/model.rs
 - src/config/io.rs

@@ -617,6 +617,10 @@ impl App {
     }
 
     pub(super) fn handle_pane_move(&mut self, id: String, params: PaneMoveParams) -> String {
+        // Pane moves can reshape tab topology (tab close cascades, cross-
+        // workspace moves); clear any in-flight island animation up front
+        // (spec: clear on any topology change).
+        self.clear_island_animation();
         let PaneMoveParams {
             pane_id,
             destination,
