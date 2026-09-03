@@ -1474,6 +1474,11 @@ impl IslandSpring {
 pub(crate) struct IslandAnim {
     pub(crate) from_tab: usize,
     pub(crate) to_tab: usize,
+    /// Display mode the endpoints were computed in when the animation
+    /// started. A mid-flight geometry change to a different mode (e.g. a
+    /// resize forcing the labels-to-dots fallback) cuts the animated overlay
+    /// instead of flipping modes on screen.
+    pub(crate) display: crate::config::IslandDisplayConfig,
     pub(crate) outgoing_width: IslandSpring,
     pub(crate) incoming_width: IslandSpring,
     pub(crate) capsule_total: IslandSpring,

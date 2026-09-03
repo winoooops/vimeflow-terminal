@@ -619,6 +619,7 @@ pub(crate) fn island_animation_for_tab_change(
     Some(IslandAnim {
         from_tab,
         to_tab,
+        display: endpoints.display,
         outgoing_width,
         incoming_width,
         capsule_total,
@@ -635,6 +636,12 @@ fn activation(position: f32, inactive: f32, active: f32) -> f32 {
 fn layout_animated(app: &AppState, area: Rect) -> Option<AnimatedIslandLayout> {
     let anim = app.island_anim?;
     let endpoints = animation_endpoints(app, area, anim.from_tab, anim.to_tab)?;
+    // A mid-flight geometry change (e.g. a resize paginating labels apart so
+    // the endpoints fall back to dots) must not flip display modes on screen:
+    // cut the animated overlay and render settled; the springs settle quietly.
+    if endpoints.display != anim.display {
+        return None;
+    }
     // The non-participant width (caps, conditional endpoint padding, other
     // markers, indicator) can differ between the from- and to-layouts —
     // e.g. the pill moving to an edge flips the flush/clearance padding.
@@ -1005,12 +1012,24 @@ fn render_animated_layout(
     let outgoing_tone = positional_fg(app, anim.from_tab, anim.to_tab);
     let incoming_tone = positional_fg(app, anim.to_tab, anim.from_tab);
     let host_theme = &app.host_terminal_theme;
+    // "reset"-aliased tones have no channels when the host never reported its
+    // default foreground (Windows skips the OSC 10/4 query entirely), which
+    // would hold the from-color for the whole crossfade and pop at the end.
+    // Approximate with the theme's own text token for the blend; settled
+    // frames still paint the genuine Reset.
+    let resolve_reset = |color: Color| {
+        if color == Color::Reset && host_theme.foreground.is_none() {
+            p.text
+        } else {
+            color
+        }
+    };
     let (outgoing_fill, incoming_fill) = if crossfade {
         (
             brighten(
                 lerp_hsl(
-                    outgoing_tone,
-                    p.accent,
+                    resolve_reset(outgoing_tone),
+                    resolve_reset(p.accent),
                     animated.outgoing_activation,
                     host_theme,
                 ),
@@ -1019,8 +1038,8 @@ fn render_animated_layout(
             ),
             brighten(
                 lerp_hsl(
-                    incoming_tone,
-                    p.accent,
+                    resolve_reset(incoming_tone),
+                    resolve_reset(p.accent),
                     animated.incoming_activation,
                     host_theme,
                 ),
@@ -1291,6 +1310,76 @@ mod tests {
     }
 
     #[test]
+    fn mid_flight_display_fallback_cuts_the_animated_overlay() {
+        let wide = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 1);
+        app.island.display = IslandDisplayConfig::Labels;
+        app.island.motion = IslandMotionConfig::Smooth;
+        for (idx, label) in ["alpha-one-long", "beta-two-long", "gamma-three-long"]
+            .iter()
+            .enumerate()
+        {
+            app.workspaces[0].tabs[idx].set_custom_name((*label).into());
+        }
+        app.island_anim = island_animation_for_tab_change(&app, wide, 0, 1);
+        let anim = app.island_anim.expect("labels animation");
+        assert_eq!(anim.display, IslandDisplayConfig::Labels);
+        assert!(
+            layout_animated(&app, wide).is_some(),
+            "unchanged geometry keeps animating"
+        );
+
+        // Narrowing paginates the labels apart; the endpoints fall back to
+        // dots geometry, which must cut the overlay instead of flipping
+        // display modes on screen mid-flight.
+        let narrow = Rect::new(0, 0, 30, 1);
+        let narrow_endpoints = animation_endpoints(&app, narrow, 0, 1).expect("fallback endpoints");
+        assert_eq!(
+            narrow_endpoints.display,
+            IslandDisplayConfig::Dots,
+            "fixture must trigger the labels-to-dots fallback"
+        );
+        assert!(layout_animated(&app, narrow).is_none());
+    }
+
+    #[test]
+    fn reset_tones_crossfade_via_theme_text_when_host_fg_is_unreported() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = animated_app(IslandDisplayConfig::Dots, IslandMotionConfig::Smooth, area);
+        app.palette.overlay0 = Color::Reset;
+        app.palette.overlay1 = Color::Reset;
+        app.palette.text = Color::Rgb(210, 200, 190);
+        assert!(app.host_terminal_theme.foreground.is_none());
+        set_spring_frame(&mut app, 3.4, 2.6, 6.0, -20.0, 20.0);
+        let animated = layout_animated(&app, area).expect("animated layout");
+        let anim = app.island_anim.expect("animation state");
+        let incoming =
+            animated_participant_rect(&app, &animated, anim.to_tab, animated.widths.incoming)
+                .expect("incoming participant");
+        let buffer = rendered_buffer(&app, area);
+        let host_theme = &app.host_terminal_theme;
+        let expected = brighten(
+            lerp_hsl(
+                app.palette.text,
+                app.palette.accent,
+                animated.incoming_activation,
+                host_theme,
+            ),
+            animated.incoming_velocity,
+            host_theme,
+        );
+        assert!(
+            matches!(expected, Color::Rgb(..)),
+            "fixture must produce a concrete blend"
+        );
+        assert_eq!(
+            buffer[(incoming.x, incoming.y)].style().fg,
+            Some(expected),
+            "reset tones blend through the theme text token instead of popping"
+        );
+    }
+
+    #[test]
     fn crossfade_resolves_named_colors_through_the_host_palette() {
         let host_red = crate::terminal_theme::RgbColor {
             r: 250,
@@ -1366,6 +1455,7 @@ mod tests {
         let anim = IslandAnim {
             from_tab: 1,
             to_tab: 2,
+            display: IslandDisplayConfig::Dots,
             outgoing_width: IslandSpring::new(5.0, 1.0),
             incoming_width: IslandSpring::new(1.0, 5.0),
             capsule_total: IslandSpring::new(6.0, 6.0),

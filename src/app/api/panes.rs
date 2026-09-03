@@ -2246,6 +2246,7 @@ mod tests {
         app.state.island_anim = Some(crate::app::state::IslandAnim {
             from_tab: 0,
             to_tab: 1,
+            display: crate::config::IslandDisplayConfig::Dots,
             outgoing_width: crate::app::state::IslandSpring::new(3.0, 1.0),
             incoming_width: crate::app::state::IslandSpring::new(3.0, 5.0),
             capsule_total: crate::app::state::IslandSpring::new(6.0, 6.0),
