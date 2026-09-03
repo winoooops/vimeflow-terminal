@@ -1050,14 +1050,22 @@ fn render_animated_layout(
     // "reset"-aliased tones have no channels when the host never reported its
     // default foreground (Windows skips the OSC 10/4 query entirely), which
     // would hold the from-color for the whole crossfade and pop at the end.
-    // Approximate with the theme's own text token for the blend; settled
-    // frames still paint the genuine Reset.
+    // Approximate with the theme's own text token for the blend — and when
+    // that is itself "reset", with the appearance-matched stock foreground —
+    // so the chain always ends concrete. Settled frames still paint the
+    // genuine Reset.
     let resolve_reset = |color: Color| {
-        if color == Color::Reset && host_theme.foreground.is_none() {
-            p.text
-        } else {
-            color
+        if color != Color::Reset || host_theme.foreground.is_some() {
+            return color;
         }
+        if p.text != Color::Reset {
+            return p.text;
+        }
+        let (r, g, b) = stock_palette_channels(match app.host_terminal_appearance {
+            Some(crate::terminal_theme::HostAppearance::Light) => 0,
+            _ => 7,
+        });
+        Color::Rgb(r, g, b)
     };
     let (outgoing_fill, incoming_fill) = if crossfade {
         (
@@ -1492,6 +1500,42 @@ mod tests {
             buffer[(incoming.x, incoming.y)].style().fg,
             Some(expected),
             "reset tones blend through the theme text token instead of popping"
+        );
+    }
+
+    #[test]
+    fn reset_tones_blend_via_stock_foreground_when_theme_text_is_also_reset() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = animated_app(IslandDisplayConfig::Dots, IslandMotionConfig::Smooth, area);
+        app.palette.overlay0 = Color::Reset;
+        app.palette.overlay1 = Color::Reset;
+        app.palette.text = Color::Reset;
+        assert!(app.host_terminal_theme.foreground.is_none());
+        assert!(app.host_terminal_appearance.is_none());
+        set_spring_frame(&mut app, 3.4, 2.6, 6.0, -20.0, 20.0);
+        let animated = layout_animated(&app, area).expect("animated layout");
+        let anim = app.island_anim.expect("animation state");
+        let incoming =
+            animated_participant_rect(&app, &animated, anim.to_tab, animated.widths.incoming)
+                .expect("incoming participant");
+        let buffer = rendered_buffer(&app, area);
+        let host_theme = &app.host_terminal_theme;
+        let (r, g, b) = stock_palette_channels(7);
+        let expected = brighten(
+            lerp_hsl(
+                Color::Rgb(r, g, b),
+                app.palette.accent,
+                animated.incoming_activation,
+                host_theme,
+            ),
+            animated.incoming_velocity,
+            host_theme,
+        );
+        assert!(matches!(expected, Color::Rgb(..)));
+        assert_eq!(
+            buffer[(incoming.x, incoming.y)].style().fg,
+            Some(expected),
+            "an all-reset theme still blends via the stock foreground"
         );
     }
 
