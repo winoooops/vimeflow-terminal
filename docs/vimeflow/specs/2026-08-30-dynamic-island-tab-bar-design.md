@@ -257,7 +257,10 @@ flips, and workspace switches always cut — never slide.
   labels-mode capsule total) replaces duration+easing entirely — position
   and velocity stepped at the 16ms tick, stiffness tuned so an
   uninterrupted switch settles in ≈120–150ms; a tab switch mid-flight
-  **retargets** the springs, carrying velocity (no restart, no jank);
+  **retargets** the springs, carrying velocity for the tabs they represent
+  (a reversal continues both springs; a switch onward to a third tab keeps
+  the departing tab's spring and starts the new tab from its settled
+  geometry) — no restart, no jank;
   settle = all springs within epsilon of target with negligible velocity.
   The outgoing pill shrinks toward its resting marker while the incoming
   marker grows to the pill **in the same frames**. Width conservation is

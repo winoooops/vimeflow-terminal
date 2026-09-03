@@ -4453,13 +4453,15 @@ mod tests {
             ),
             (4.0, 7.0, 1.0)
         );
+        // The third tab was never animating; it starts from its own settled
+        // inactive geometry instead of inheriting the departed tab's spring.
         assert_eq!(
             (
                 retargeted.incoming_width.position,
                 retargeted.incoming_width.velocity,
                 retargeted.incoming_width.target,
             ),
-            (2.0, -7.0, 5.0)
+            (1.0, 0.0, 5.0)
         );
         assert_eq!(retargeted.capsule_total.velocity, 2.0);
     }

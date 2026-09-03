@@ -582,9 +582,22 @@ pub(crate) fn island_animation_for_tab_change(
     let endpoints = animation_endpoints(app, area, from_tab, to_tab)?;
     let (mut outgoing_width, mut incoming_width, mut capsule_total) =
         if let Some(current) = app.island_anim.filter(|anim| anim.to_tab == from_tab) {
+            // Springs carry per-tab visual state: the old incoming spring is
+            // the new outgoing tab's own geometry. The old outgoing spring
+            // belongs to the tab we were leaving, so it only carries over when
+            // reversing back to that tab; a third tab's marker has been
+            // rendered settled all along and starts from its actual geometry.
+            let incoming_width = if current.from_tab == to_tab {
+                current.outgoing_width
+            } else {
+                IslandSpring::new(
+                    endpoints.settled_from.incoming,
+                    endpoints.settled_to.incoming,
+                )
+            };
             (
                 current.incoming_width,
-                current.outgoing_width,
+                incoming_width,
                 current.capsule_total,
             )
         } else {
@@ -1216,6 +1229,64 @@ mod tests {
             "fixed width must interpolate on participant travel when the capsule \
              range is degenerate: got {}, want {expected}",
             animated.fixed_width
+        );
+    }
+
+    #[test]
+    fn rapid_retarget_reuses_springs_only_for_the_tab_they_represent() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 1);
+        app.island.display = IslandDisplayConfig::Labels;
+        app.island.motion = IslandMotionConfig::Smooth;
+        for (idx, label) in ["aa", "beeeeee", "c"].iter().enumerate() {
+            app.workspaces[0].tabs[idx].set_custom_name((*label).into());
+        }
+
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        let mid = {
+            let anim = app.island_anim.as_mut().expect("first animation");
+            anim.outgoing_width.position += 0.4;
+            anim.outgoing_width.velocity = -3.0;
+            anim.incoming_width.position += 0.3;
+            anim.incoming_width.velocity = 2.5;
+            *anim
+        };
+
+        // Onward to a third tab: the shared pill spring carries, but the
+        // third tab starts from its own settled geometry, not the departed
+        // tab's mid-flight spring.
+        app.workspaces[0].switch_tab(2);
+        let onward = island_animation_for_tab_change(&app, area, 1, 2).expect("onward animation");
+        let onward_endpoints = animation_endpoints(&app, area, 1, 2).expect("onward endpoints");
+        assert_eq!(
+            (
+                onward.outgoing_width.position,
+                onward.outgoing_width.velocity
+            ),
+            (mid.incoming_width.position, mid.incoming_width.velocity),
+            "the outgoing tab keeps its own in-flight spring"
+        );
+        assert_eq!(
+            (
+                onward.incoming_width.position,
+                onward.incoming_width.velocity
+            ),
+            (onward_endpoints.settled_from.incoming, 0.0),
+            "a third tab starts from its actual settled geometry"
+        );
+
+        // Reversing back reuses the departed tab's own spring.
+        app.workspaces[0].switch_tab(0);
+        app.island_anim = Some(mid);
+        let reversed =
+            island_animation_for_tab_change(&app, area, 1, 0).expect("reversed animation");
+        assert_eq!(
+            (
+                reversed.incoming_width.position,
+                reversed.incoming_width.velocity
+            ),
+            (mid.outgoing_width.position, mid.outgoing_width.velocity),
+            "reversal continues the original tab's spring"
         );
     }
 
