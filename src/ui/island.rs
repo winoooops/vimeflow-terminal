@@ -184,7 +184,7 @@ fn quantized_participant_widths(
     display: IslandDisplayConfig,
     caps: IslandCapsConfig,
     widths: ParticipantWidths,
-) -> ParticipantWidths {
+) -> Option<ParticipantWidths> {
     let minimum = if caps == IslandCapsConfig::Round {
         2.0
     } else {
@@ -193,13 +193,17 @@ fn quantized_participant_widths(
     match display {
         IslandDisplayConfig::Dots | IslandDisplayConfig::Numbers => {
             let total = widths.total().round();
-            let outgoing = widths.outgoing.round().clamp(minimum, total - minimum);
-            ParticipantWidths::new(outgoing, total - outgoing)
+            let maximum = total - minimum;
+            if maximum < minimum {
+                return None;
+            }
+            let outgoing = widths.outgoing.round().clamp(minimum, maximum);
+            Some(ParticipantWidths::new(outgoing, total - outgoing))
         }
-        IslandDisplayConfig::Labels => ParticipantWidths::new(
+        IslandDisplayConfig::Labels => Some(ParticipantWidths::new(
             widths.outgoing.round().max(minimum),
             widths.incoming.round().max(minimum),
-        ),
+        )),
     }
 }
 
@@ -616,6 +620,11 @@ pub(crate) fn island_animation_for_tab_change(
     outgoing_width.retarget(endpoints.settled_to.outgoing);
     incoming_width.retarget(endpoints.settled_to.incoming);
     capsule_total.retarget(endpoints.settled_to.total());
+    quantized_participant_widths(
+        endpoints.display,
+        app.island.caps,
+        ParticipantWidths::new(outgoing_width.position, incoming_width.position),
+    )?;
     Some(IslandAnim {
         from_tab,
         to_tab,
@@ -677,6 +686,8 @@ fn layout_animated(app: &AppState, area: Rect) -> Option<AnimatedIslandLayout> {
         .map_or(1.0, |(position, from, to)| activation(position, from, to));
     let fixed_width = lerp(fixed_from, fixed_to, fixed_progress);
     let widths = ParticipantWidths::new(anim.outgoing_width.position, anim.incoming_width.position);
+    let quantized_widths =
+        quantized_participant_widths(endpoints.display, app.island.caps, widths)?;
     let outgoing_activation = activation(
         widths.outgoing,
         endpoints.settled_to.outgoing,
@@ -693,7 +704,7 @@ fn layout_animated(app: &AppState, area: Rect) -> Option<AnimatedIslandLayout> {
         from: endpoints.from,
         to: endpoints.to,
         display: endpoints.display,
-        widths: quantized_participant_widths(endpoints.display, app.island.caps, widths),
+        widths: quantized_widths,
         capsule_total: anim.capsule_total.position,
         fixed_width,
         outgoing_activation,
@@ -1307,6 +1318,25 @@ mod tests {
             (mid.outgoing_width.position, mid.outgoing_width.velocity),
             "reversal continues the original tab's spring"
         );
+    }
+
+    #[test]
+    fn two_immediate_switches_cut_an_under_width_animation() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 0);
+        app.island.display = IslandDisplayConfig::Dots;
+        app.island.caps = IslandCapsConfig::Round;
+        app.island.motion = IslandMotionConfig::Smooth;
+
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        app.workspaces[0].switch_tab(1);
+        app.island_anim = island_animation_for_tab_change(&app, area, 1, 2);
+        app.workspaces[0].switch_tab(2);
+
+        assert!(app.island_anim.is_none());
+        let mut settled = app_with_tabs(3, 2);
+        settled.island = app.island;
+        assert_eq!(rendered_buffer(&app, area), rendered_buffer(&settled, area));
     }
 
     #[test]

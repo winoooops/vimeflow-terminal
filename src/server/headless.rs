@@ -3078,6 +3078,7 @@ impl HeadlessServer {
                     render_state.request_repaint();
                     return true;
                 }
+                self.app.clear_island_animation();
                 if let Some(client) = self.clients.get_mut(&client_id) {
                     client.terminal_size = (cols, rows);
                     client.cell_size = crate::kitty_graphics::HostCellSize {
@@ -7324,6 +7325,29 @@ next_tab = ""
             server.app.state.host_terminal_theme,
             server.clients[&1].host_terminal_theme
         );
+    }
+
+    #[test]
+    fn client_resize_cuts_active_island_animation() {
+        let mut server = test_headless_server();
+        server.clients.insert(1, test_app_client(Some(true), 1));
+        server.app.state.island_anim = Some(crate::app::state::IslandAnim {
+            from_tab: 0,
+            to_tab: 1,
+            display: crate::config::IslandDisplayConfig::Dots,
+            outgoing_width: crate::app::state::IslandSpring::new(5.0, 1.0),
+            incoming_width: crate::app::state::IslandSpring::new(1.0, 5.0),
+            capsule_total: crate::app::state::IslandSpring::new(6.0, 6.0),
+        });
+
+        assert!(server.handle_server_event(ServerEvent::ClientResize {
+            client_id: 1,
+            cols: 35,
+            rows: 24,
+            cell_width_px: 0,
+            cell_height_px: 0,
+        }));
+        assert!(server.app.state.island_anim.is_none());
     }
 
     #[test]

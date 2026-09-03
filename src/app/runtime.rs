@@ -274,6 +274,7 @@ impl App {
         };
         if self.last_terminal_size != Some(size) {
             self.last_terminal_size = Some(size);
+            self.clear_island_animation();
             return true;
         }
         false
