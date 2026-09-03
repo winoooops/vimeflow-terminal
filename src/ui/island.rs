@@ -47,71 +47,54 @@ fn lerp(from: f32, to: f32, progress: f32) -> f32 {
     from + (to - from) * normalized_progress(progress)
 }
 
+/// Host palette slots reported via OSC 4; `None` where the host never answered.
+type HostPalette = [Option<crate::terminal_theme::RgbColor>; 256];
+
 /// Resolve any concrete palette color to RGB channels so the crossfade never
 /// degrades to an end-of-animation pop for named-ANSI or indexed themes.
-/// `Reset` alone stays unresolvable (it has no defined channels).
-fn color_channels(color: Color) -> Option<(u8, u8, u8)> {
-    let named = |r, g, b| Some((r, g, b));
+/// Named and indexed slots resolve through the host-reported palette first so
+/// motion frames stay on the user's actual theme colors; slots the host never
+/// reported fall back to the stock ghostty palette. `Reset` alone stays
+/// unresolvable (it has no defined channels).
+fn color_channels(color: Color, host_palette: &HostPalette) -> Option<(u8, u8, u8)> {
+    let indexed = |idx: u8| {
+        Some(
+            host_palette[usize::from(idx)]
+                .map(|rgb| (rgb.r, rgb.g, rgb.b))
+                .unwrap_or_else(|| stock_palette_channels(idx)),
+        )
+    };
     match color {
         Color::Rgb(r, g, b) => Some((r, g, b)),
-        Color::Black => named(0, 0, 0),
-        Color::Red => named(205, 49, 49),
-        Color::Green => named(13, 188, 121),
-        Color::Yellow => named(229, 229, 16),
-        Color::Blue => named(36, 114, 200),
-        Color::Magenta => named(188, 63, 188),
-        Color::Cyan => named(17, 168, 205),
-        Color::Gray => named(229, 229, 229),
-        Color::DarkGray => named(102, 102, 102),
-        Color::LightRed => named(241, 76, 76),
-        Color::LightGreen => named(35, 209, 139),
-        Color::LightYellow => named(245, 245, 67),
-        Color::LightBlue => named(59, 142, 234),
-        Color::LightMagenta => named(214, 112, 214),
-        Color::LightCyan => named(41, 184, 219),
-        Color::White => named(255, 255, 255),
-        Color::Indexed(n) => Some(match n {
-            0..=15 => {
-                let base = [
-                    (0, 0, 0),
-                    (205, 49, 49),
-                    (13, 188, 121),
-                    (229, 229, 16),
-                    (36, 114, 200),
-                    (188, 63, 188),
-                    (17, 168, 205),
-                    (229, 229, 229),
-                    (102, 102, 102),
-                    (241, 76, 76),
-                    (35, 209, 139),
-                    (245, 245, 67),
-                    (59, 142, 234),
-                    (214, 112, 214),
-                    (41, 184, 219),
-                    (255, 255, 255),
-                ];
-                base[usize::from(n)]
-            }
-            16..=231 => {
-                let n = n - 16;
-                let level = |v: u8| if v == 0 { 0 } else { 55 + 40 * v };
-                (level(n / 36), level((n % 36) / 6), level(n % 6))
-            }
-            232..=255 => {
-                let v = 8 + 10 * (n - 232);
-                (v, v, v)
-            }
-        }),
         Color::Reset => None,
+        Color::Indexed(n) => indexed(n),
+        Color::Black => indexed(0),
+        Color::Red => indexed(1),
+        Color::Green => indexed(2),
+        Color::Yellow => indexed(3),
+        Color::Blue => indexed(4),
+        Color::Magenta => indexed(5),
+        Color::Cyan => indexed(6),
+        Color::Gray => indexed(7),
+        Color::DarkGray => indexed(8),
+        Color::LightRed => indexed(9),
+        Color::LightGreen => indexed(10),
+        Color::LightYellow => indexed(11),
+        Color::LightBlue => indexed(12),
+        Color::LightMagenta => indexed(13),
+        Color::LightCyan => indexed(14),
+        Color::White => indexed(15),
     }
 }
 
-fn rgb_to_hsl(color: Color) -> Option<(f32, f32, f32)> {
-    let (r, g, b) = color_channels(color)?;
-    let color = Color::Rgb(r, g, b);
-    let Color::Rgb(r, g, b) = color else {
-        return None;
-    };
+fn stock_palette_channels(idx: u8) -> (u8, u8, u8) {
+    static STOCK: std::sync::OnceLock<[crate::ghostty::RgbColor; 256]> = std::sync::OnceLock::new();
+    let rgb = STOCK.get_or_init(crate::ghostty::default_palette)[usize::from(idx)];
+    (rgb.r, rgb.g, rgb.b)
+}
+
+fn rgb_to_hsl(color: Color, host_palette: &HostPalette) -> Option<(f32, f32, f32)> {
+    let (r, g, b) = color_channels(color, host_palette)?;
     let [r, g, b] = [r, g, b].map(|channel| f32::from(channel) / 255.0);
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
@@ -147,7 +130,7 @@ fn hsl_to_rgb(hue: f32, saturation: f32, lightness: f32) -> Color {
     Color::Rgb(channel(r), channel(g), channel(b))
 }
 
-fn lerp_hsl(from: Color, to: Color, progress: f32) -> Color {
+fn lerp_hsl(from: Color, to: Color, progress: f32, host_palette: &HostPalette) -> Color {
     let progress = normalized_progress(progress);
     if progress <= 0.0 {
         return from;
@@ -156,7 +139,7 @@ fn lerp_hsl(from: Color, to: Color, progress: f32) -> Color {
         return to;
     }
     let (Some((from_h, from_s, from_l)), Some((to_h, to_s, to_l))) =
-        (rgb_to_hsl(from), rgb_to_hsl(to))
+        (rgb_to_hsl(from, host_palette), rgb_to_hsl(to, host_palette))
     else {
         return from;
     };
@@ -168,12 +151,12 @@ fn lerp_hsl(from: Color, to: Color, progress: f32) -> Color {
     )
 }
 
-fn brighten(color: Color, velocity: f32) -> Color {
+fn brighten(color: Color, velocity: f32, host_palette: &HostPalette) -> Color {
     let amount = (velocity.abs() * VELOCITY_BRIGHTNESS_SCALE).min(MAX_VELOCITY_BRIGHTNESS);
     if amount <= f32::EPSILON {
         return color;
     }
-    let Some((hue, saturation, lightness)) = rgb_to_hsl(color) else {
+    let Some((hue, saturation, lightness)) = rgb_to_hsl(color, host_palette) else {
         return color;
     };
     hsl_to_rgb(hue, saturation, (lightness + amount).min(1.0))
@@ -976,15 +959,28 @@ fn render_animated_layout(
     };
     let outgoing_tone = positional_fg(app, anim.from_tab, anim.to_tab);
     let incoming_tone = positional_fg(app, anim.to_tab, anim.from_tab);
+    let host_palette = &app.host_terminal_theme.palette;
     let (outgoing_fill, incoming_fill) = if crossfade {
         (
             brighten(
-                lerp_hsl(outgoing_tone, p.accent, animated.outgoing_activation),
+                lerp_hsl(
+                    outgoing_tone,
+                    p.accent,
+                    animated.outgoing_activation,
+                    host_palette,
+                ),
                 animated.outgoing_velocity,
+                host_palette,
             ),
             brighten(
-                lerp_hsl(incoming_tone, p.accent, animated.incoming_activation),
+                lerp_hsl(
+                    incoming_tone,
+                    p.accent,
+                    animated.incoming_activation,
+                    host_palette,
+                ),
                 animated.incoming_velocity,
+                host_palette,
             ),
         )
     } else if animated_content_visible(animated.incoming_activation) {
@@ -1136,14 +1132,58 @@ mod tests {
     fn hsl_lerp_preserves_endpoints_and_crosses_the_short_hue_arc() {
         let from = Color::Rgb(255, 0, 0);
         let to = Color::Rgb(0, 255, 0);
+        let host = [None; 256];
 
-        assert_eq!(lerp_hsl(from, to, 0.0), from);
-        assert_eq!(lerp_hsl(from, to, 0.5), Color::Rgb(255, 255, 0));
-        assert_eq!(lerp_hsl(from, to, 1.0), to);
-        assert_eq!(brighten(from, 0.0), from);
+        assert_eq!(lerp_hsl(from, to, 0.0, &host), from);
+        assert_eq!(lerp_hsl(from, to, 0.5, &host), Color::Rgb(255, 255, 0));
+        assert_eq!(lerp_hsl(from, to, 1.0, &host), to);
+        assert_eq!(brighten(from, 0.0, &host), from);
         assert_eq!(
-            brighten(Color::Rgb(100, 100, 100), 100.0),
+            brighten(Color::Rgb(100, 100, 100), 100.0, &host),
             Color::Rgb(108, 108, 108)
+        );
+    }
+
+    #[test]
+    fn crossfade_resolves_named_colors_through_the_host_palette() {
+        let host_red = crate::terminal_theme::RgbColor {
+            r: 250,
+            g: 100,
+            b: 50,
+        };
+        let mut host = [None; 256];
+        host[1] = Some(host_red);
+
+        assert_eq!(
+            color_channels(Color::Red, &host),
+            Some((host_red.r, host_red.g, host_red.b)),
+            "reported palette slots must override the stock palette"
+        );
+        assert_eq!(
+            color_channels(Color::Red, &host),
+            color_channels(Color::Indexed(1), &host),
+            "named ANSI and its index must resolve identically"
+        );
+        assert_eq!(
+            color_channels(Color::Red, &[None; 256]),
+            Some(stock_palette_channels(1)),
+            "unreported slots fall back to the stock ghostty palette"
+        );
+        // Endpoint continuity: the first blend step away from the settled frame
+        // must depart from the host's actual color, not a stock approximation.
+        assert_eq!(
+            lerp_hsl(Color::Red, Color::Rgb(0, 0, 255), 0.0, &host),
+            Color::Red
+        );
+        let near_start = lerp_hsl(Color::Red, Color::Rgb(0, 0, 255), 0.001, &host);
+        let Color::Rgb(r, g, b) = near_start else {
+            panic!("blend should produce concrete rgb: {near_start:?}");
+        };
+        assert!(
+            i16::from(r).abs_diff(i16::from(host_red.r)) <= 2
+                && i16::from(g).abs_diff(i16::from(host_red.g)) <= 2
+                && i16::from(b).abs_diff(i16::from(host_red.b)) <= 2,
+            "near-endpoint blend {near_start:?} must stay continuous with the host color {host_red:?}"
         );
     }
 
@@ -1223,21 +1263,26 @@ mod tests {
             assert_eq!((outgoing.width, incoming.width), expected_widths);
 
             let buffer = rendered_buffer(&app, area);
+            let host_palette = &app.host_terminal_theme.palette;
             let outgoing_fill = brighten(
                 lerp_hsl(
                     positional_fg(&app, anim.from_tab, anim.to_tab),
                     app.palette.accent,
                     animated.outgoing_activation,
+                    host_palette,
                 ),
                 animated.outgoing_velocity,
+                host_palette,
             );
             let incoming_fill = brighten(
                 lerp_hsl(
                     positional_fg(&app, anim.to_tab, anim.from_tab),
                     app.palette.accent,
                     animated.incoming_activation,
+                    host_palette,
                 ),
                 animated.incoming_velocity,
+                host_palette,
             );
             for (rect, fill) in [(outgoing, outgoing_fill), (incoming, incoming_fill)] {
                 assert_eq!(buffer[(rect.x, rect.y)].symbol(), LEFT_CAP, "{display:?}");
