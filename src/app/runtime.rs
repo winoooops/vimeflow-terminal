@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use std::time::Instant;
 
 #[cfg(test)]
@@ -272,13 +274,14 @@ impl App {
         };
         if self.last_terminal_size != Some(size) {
             self.last_terminal_size = Some(size);
+            self.clear_island_animation();
             return true;
         }
         false
     }
 
     pub(crate) fn handle_scheduled_tasks(&mut self, now: Instant, geometry_dirty: bool) -> bool {
-        let mut changed = false;
+        let mut changed = self.tick_island_animation(now);
         let mut resized = false;
 
         if now >= self.next_resize_poll {
@@ -600,6 +603,7 @@ impl App {
             self.session_save_deadline,
             self.selection_autoscroll_deadline,
             self.selection_highlight_clear_deadline,
+            self.island_animation_tick_deadline(),
             render_deadline,
         ]
         .into_iter()

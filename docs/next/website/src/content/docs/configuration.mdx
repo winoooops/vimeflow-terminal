@@ -263,7 +263,7 @@ Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row belo
 
 The desktop tab row uses a compact tab island by default. `ui.tab_bar_style` defaults to `"island"`; set it to `"classic"` to restore the upstream tab bar. `ui.island.position` defaults to `"center"` and also accepts `"left"`. `ui.island.display` defaults to `"dots"` and also accepts `"numbers"` or `"labels"`.
 
-Labels mode truncates the active tab label to 16 terminal cells. `ui.island.caps` defaults to `"round"`; Ghostty, Kitty, and WezTerm render the caps natively, while `"square"` restores the flat fallback. All four settings reload live.
+Labels mode truncates the active tab label to 16 terminal cells. `ui.island.caps` defaults to `"round"`; Ghostty, Kitty, and WezTerm render the caps natively, while `"square"` restores the flat fallback. `ui.island.motion` defaults to `"smooth"`; use `"steps"` for whole-cell motion or `"off"` as the reduced-motion escape. All five settings reload live.
 
 ### Sidebar row layouts
 

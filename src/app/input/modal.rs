@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[cfg(test)]
 use ratatui::layout::Direction;
@@ -559,6 +561,16 @@ pub(super) fn apply_rename_action(state: &mut AppState, action: ModalAction) {
                                         .unwrap_or_else(|| workspace_id.clone());
                                     crate::logging::tab_renamed(&workspace_id, &tab_id);
                                     state.mark_session_dirty();
+                                    if state.island.display
+                                        == crate::config::IslandDisplayConfig::Labels
+                                    {
+                                        // A renamed label changes the animated
+                                        // endpoint geometry while the in-flight
+                                        // springs still target pre-rename widths;
+                                        // snap instead of settling against
+                                        // obsolete targets.
+                                        state.island_anim = None;
+                                    }
                                 }
                             }
                         }

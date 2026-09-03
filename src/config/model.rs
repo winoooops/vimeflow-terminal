@@ -848,11 +848,21 @@ pub enum IslandCapsConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandMotionConfig {
+    #[default]
+    Smooth,
+    Steps,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct IslandConfig {
     pub position: IslandPositionConfig,
     pub display: IslandDisplayConfig,
     pub caps: IslandCapsConfig,
+    pub motion: IslandMotionConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1400,6 +1410,7 @@ tab_bar_position = "bottom"
         assert_eq!(config.ui.island.position, IslandPositionConfig::Center);
         assert_eq!(config.ui.island.display, IslandDisplayConfig::Dots);
         assert_eq!(config.ui.island.caps, IslandCapsConfig::Round);
+        assert_eq!(config.ui.island.motion, IslandMotionConfig::Smooth);
     }
 
     #[test]
@@ -1441,6 +1452,24 @@ caps = "square"
         .unwrap();
 
         assert_eq!(config.ui.island.caps, IslandCapsConfig::Square);
+    }
+
+    #[test]
+    fn island_motion_parses_all_values() {
+        for (value, expected) in [
+            ("smooth", IslandMotionConfig::Smooth),
+            ("steps", IslandMotionConfig::Steps),
+            ("off", IslandMotionConfig::Off),
+        ] {
+            let toml = format!("[ui.island]\nmotion = \"{value}\"\n");
+            let config: Config = toml::from_str(&toml).unwrap();
+            assert_eq!(config.ui.island.motion, expected);
+        }
+    }
+
+    #[test]
+    fn island_motion_rejects_unknown_value() {
+        assert!(toml::from_str::<Config>("[ui.island]\nmotion = \"unknown\"\n").is_err());
     }
 
     #[test]

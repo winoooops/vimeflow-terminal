@@ -1425,6 +1425,79 @@ pub(crate) struct PaneFocusTarget {
     pub pane_id: PaneId,
 }
 
+pub(crate) const ISLAND_SPRING_STIFFNESS: f32 = 6_000.0;
+const ISLAND_SPRING_DAMPING_RATIO: f32 = 1.0;
+const ISLAND_SPRING_SUBSTEPS: usize = 4;
+const ISLAND_SPRING_POSITION_EPSILON: f32 = 0.05;
+const ISLAND_SPRING_VELOCITY_EPSILON: f32 = 1.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct IslandSpring {
+    pub(crate) position: f32,
+    pub(crate) velocity: f32,
+    pub target: f32,
+    pub stiffness: f32,
+}
+
+impl IslandSpring {
+    pub(crate) const fn new(position: f32, target: f32) -> Self {
+        Self {
+            position,
+            velocity: 0.0,
+            target,
+            stiffness: ISLAND_SPRING_STIFFNESS,
+        }
+    }
+
+    pub(crate) fn retarget(&mut self, target: f32) {
+        self.target = target;
+    }
+
+    pub(crate) fn step(&mut self, dt: f32) {
+        let dt = dt / ISLAND_SPRING_SUBSTEPS as f32;
+        let damping = 2.0 * ISLAND_SPRING_DAMPING_RATIO * self.stiffness.sqrt();
+        for _ in 0..ISLAND_SPRING_SUBSTEPS {
+            let acceleration =
+                -self.stiffness * (self.position - self.target) - damping * self.velocity;
+            self.velocity += acceleration * dt;
+            self.position += self.velocity * dt;
+        }
+    }
+
+    pub(crate) fn is_settled(self) -> bool {
+        (self.position - self.target).abs() <= ISLAND_SPRING_POSITION_EPSILON
+            && self.velocity.abs() <= ISLAND_SPRING_VELOCITY_EPSILON
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct IslandAnim {
+    pub(crate) from_tab: usize,
+    pub(crate) to_tab: usize,
+    /// Display mode the endpoints were computed in when the animation
+    /// started. A mid-flight geometry change to a different mode (e.g. a
+    /// resize forcing the labels-to-dots fallback) cuts the animated overlay
+    /// instead of flipping modes on screen.
+    pub(crate) display: crate::config::IslandDisplayConfig,
+    /// First tab index and marker count of the page the animation started on.
+    /// A resize that changes the page plan mid-flight (markers leaving the
+    /// page, the indicator appearing) cuts the animated overlay instead of
+    /// jumping the capsule.
+    pub(crate) page_start: usize,
+    pub(crate) page_len: usize,
+    pub(crate) outgoing_width: IslandSpring,
+    pub(crate) incoming_width: IslandSpring,
+    pub(crate) capsule_total: IslandSpring,
+}
+
+impl IslandAnim {
+    pub(crate) fn is_settled(self) -> bool {
+        self.outgoing_width.is_settled()
+            && self.incoming_width.is_settled()
+            && self.capsule_total.is_settled()
+    }
+}
+
 /// All application state — pure data, no channels or async runtime.
 /// Testable without PTYs or a tokio runtime.
 pub struct AppState {
@@ -1553,6 +1626,7 @@ pub struct AppState {
     pub tab_bar_position: TabBarPositionConfig,
     pub tab_bar_style: crate::config::TabBarStyleConfig,
     pub island: crate::config::IslandConfig,
+    pub island_anim: Option<IslandAnim>,
     pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`. See `[experimental] reveal_hidden_cursor_for_cjk_ime`.
@@ -1940,6 +2014,7 @@ impl AppState {
             tab_bar_position: TabBarPositionConfig::Top,
             tab_bar_style: crate::config::TabBarStyleConfig::Island,
             island: crate::config::IslandConfig::default(),
+            island_anim: None,
             pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
             cjk_ime_agent_filter_configured: false,
@@ -2344,6 +2419,42 @@ impl AppState {
 mod tests {
     use super::*;
     use crossterm::event::KeyEvent;
+
+    #[test]
+    fn island_spring_settles_in_tuned_window() {
+        let mut spring = IslandSpring::new(1.0, 18.0);
+        let mut ticks = 0;
+        while !spring.is_settled() && ticks < 100 {
+            spring.step(0.016);
+            ticks += 1;
+        }
+
+        assert!((120..=150).contains(&(ticks * 16)));
+    }
+
+    #[test]
+    fn island_spring_retarget_carries_velocity() {
+        let mut spring = IslandSpring::new(1.0, 5.0);
+        spring.step(0.016);
+        let velocity = spring.velocity;
+
+        spring.retarget(2.0);
+
+        assert_eq!(spring.velocity, velocity);
+        assert_ne!(spring.velocity, 0.0);
+    }
+
+    #[test]
+    fn critically_damped_island_spring_does_not_overshoot() {
+        let mut growing = IslandSpring::new(1.0, 5.0);
+        let mut shrinking = IslandSpring::new(5.0, 1.0);
+        for _ in 0..40 {
+            growing.step(0.016);
+            shrinking.step(0.016);
+            assert!(growing.position <= growing.target);
+            assert!(shrinking.position >= shrinking.target);
+        }
+    }
 
     #[test]
     fn compact_rail_mark_width_one_is_padded() {

@@ -1,10 +1,17 @@
-use ratatui::{layout::Rect, style::Style, widgets::Paragraph, Frame};
+use ratatui::{
+    layout::Rect,
+    style::{Color, Style},
+    widgets::Paragraph,
+    Frame,
+};
 
 use super::tabs::TabBarView;
 use super::text::{display_width, display_width_u16, truncate_end};
 use super::widgets::panel_contrast_fg;
-use crate::app::AppState;
-use crate::config::{IslandCapsConfig, IslandDisplayConfig, IslandPositionConfig};
+use crate::app::state::{AppState, IslandAnim, IslandSpring};
+use crate::config::{
+    IslandCapsConfig, IslandDisplayConfig, IslandMotionConfig, IslandPositionConfig,
+};
 
 const LEFT_CAP: &str = "\u{e0b6}";
 const RIGHT_CAP: &str = "\u{e0b4}";
@@ -13,6 +20,197 @@ const CAPSULE_PADDING_BUDGET: usize = 1;
 const MARKER_GAP: usize = 1;
 const MAX_PAGE_SIZE: usize = 10;
 const LABEL_MAX_WIDTH: usize = 16;
+const VELOCITY_BRIGHTNESS_SCALE: f32 = 0.000_3;
+const MAX_VELOCITY_BRIGHTNESS: f32 = 0.06;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ParticipantWidths {
+    outgoing: f32,
+    incoming: f32,
+}
+
+impl ParticipantWidths {
+    const fn new(outgoing: f32, incoming: f32) -> Self {
+        Self { outgoing, incoming }
+    }
+
+    fn total(self) -> f32 {
+        self.outgoing + self.incoming
+    }
+}
+
+fn normalized_progress(progress: f32) -> f32 {
+    progress.clamp(0.0, 1.0)
+}
+
+fn lerp(from: f32, to: f32, progress: f32) -> f32 {
+    from + (to - from) * normalized_progress(progress)
+}
+
+/// Resolve any concrete palette color to RGB channels so the crossfade never
+/// degrades to an end-of-animation pop for named-ANSI or indexed themes.
+/// Named and indexed slots resolve through the host-reported palette (OSC 4)
+/// first so motion frames stay on the user's actual theme colors; slots the
+/// host never reported fall back to the stock ghostty palette. `Reset` (the
+/// "reset"/"default" theme alias) resolves through the host-reported default
+/// foreground (OSC 10) and stays unresolvable only when the host never
+/// answered that query.
+fn color_channels(
+    color: Color,
+    host_theme: &crate::terminal_theme::TerminalTheme,
+) -> Option<(u8, u8, u8)> {
+    let indexed = |idx: u8| {
+        Some(
+            host_theme.palette[usize::from(idx)]
+                .map(|rgb| (rgb.r, rgb.g, rgb.b))
+                .unwrap_or_else(|| stock_palette_channels(idx)),
+        )
+    };
+    match color {
+        Color::Rgb(r, g, b) => Some((r, g, b)),
+        Color::Reset => host_theme.foreground.map(|rgb| (rgb.r, rgb.g, rgb.b)),
+        Color::Indexed(n) => indexed(n),
+        Color::Black => indexed(0),
+        Color::Red => indexed(1),
+        Color::Green => indexed(2),
+        Color::Yellow => indexed(3),
+        Color::Blue => indexed(4),
+        Color::Magenta => indexed(5),
+        Color::Cyan => indexed(6),
+        Color::Gray => indexed(7),
+        Color::DarkGray => indexed(8),
+        Color::LightRed => indexed(9),
+        Color::LightGreen => indexed(10),
+        Color::LightYellow => indexed(11),
+        Color::LightBlue => indexed(12),
+        Color::LightMagenta => indexed(13),
+        Color::LightCyan => indexed(14),
+        Color::White => indexed(15),
+    }
+}
+
+fn stock_palette_channels(idx: u8) -> (u8, u8, u8) {
+    static STOCK: std::sync::OnceLock<[crate::ghostty::RgbColor; 256]> = std::sync::OnceLock::new();
+    let rgb = STOCK.get_or_init(crate::ghostty::default_palette)[usize::from(idx)];
+    (rgb.r, rgb.g, rgb.b)
+}
+
+fn rgb_to_hsl(
+    color: Color,
+    host_theme: &crate::terminal_theme::TerminalTheme,
+) -> Option<(f32, f32, f32)> {
+    let (r, g, b) = color_channels(color, host_theme)?;
+    let [r, g, b] = [r, g, b].map(|channel| f32::from(channel) / 255.0);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let lightness = (max + min) / 2.0;
+    if delta <= f32::EPSILON {
+        return Some((0.0, 0.0, lightness));
+    }
+    let saturation = delta / (1.0 - (2.0 * lightness - 1.0).abs());
+    let hue = if max == r {
+        60.0 * ((g - b) / delta).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    Some((hue, saturation, lightness))
+}
+
+fn hsl_to_rgb(hue: f32, saturation: f32, lightness: f32) -> Color {
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let x = chroma * (1.0 - ((hue / 60.0).rem_euclid(2.0) - 1.0).abs());
+    let (r, g, b) = match hue.rem_euclid(360.0) {
+        hue if hue < 60.0 => (chroma, x, 0.0),
+        hue if hue < 120.0 => (x, chroma, 0.0),
+        hue if hue < 180.0 => (0.0, chroma, x),
+        hue if hue < 240.0 => (0.0, x, chroma),
+        hue if hue < 300.0 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+    let offset = lightness - chroma / 2.0;
+    let channel = |value: f32| ((value + offset) * 255.0).round() as u8;
+    Color::Rgb(channel(r), channel(g), channel(b))
+}
+
+fn lerp_hsl(
+    from: Color,
+    to: Color,
+    progress: f32,
+    host_theme: &crate::terminal_theme::TerminalTheme,
+) -> Color {
+    let progress = normalized_progress(progress);
+    if progress <= 0.0 {
+        return from;
+    }
+    if progress >= 1.0 {
+        return to;
+    }
+    let (Some((from_h, from_s, from_l)), Some((to_h, to_s, to_l))) =
+        (rgb_to_hsl(from, host_theme), rgb_to_hsl(to, host_theme))
+    else {
+        return from;
+    };
+    let hue_delta = (to_h - from_h + 180.0).rem_euclid(360.0) - 180.0;
+    hsl_to_rgb(
+        from_h + hue_delta * progress,
+        lerp(from_s, to_s, progress),
+        lerp(from_l, to_l, progress),
+    )
+}
+
+fn brighten(
+    color: Color,
+    velocity: f32,
+    host_theme: &crate::terminal_theme::TerminalTheme,
+) -> Color {
+    let amount = (velocity.abs() * VELOCITY_BRIGHTNESS_SCALE).min(MAX_VELOCITY_BRIGHTNESS);
+    if amount <= f32::EPSILON {
+        return color;
+    }
+    let Some((hue, saturation, lightness)) = rgb_to_hsl(color, host_theme) else {
+        return color;
+    };
+    hsl_to_rgb(hue, saturation, (lightness + amount).min(1.0))
+}
+
+fn animated_content_visible(progress: f32) -> bool {
+    progress > 0.6
+}
+
+fn quantized_participant_widths(
+    display: IslandDisplayConfig,
+    caps: IslandCapsConfig,
+    widths: ParticipantWidths,
+) -> Option<ParticipantWidths> {
+    let minimum = if caps == IslandCapsConfig::Round {
+        2.0
+    } else {
+        1.0
+    };
+    match display {
+        IslandDisplayConfig::Dots | IslandDisplayConfig::Numbers => {
+            let total = widths.total().round();
+            // Rapid onward retargets can catch both participants at their
+            // inactive width (e.g. two next-tab presses inside one tick), so
+            // the total cannot carry both participants' caps; report that so
+            // the caller cuts to a settled frame instead of clamping into a
+            // reversed range and panicking.
+            let maximum = total - minimum;
+            if maximum < minimum {
+                return None;
+            }
+            let outgoing = widths.outgoing.round().clamp(minimum, maximum);
+            Some(ParticipantWidths::new(outgoing, total - outgoing))
+        }
+        IslandDisplayConfig::Labels => Some(ParticipantWidths::new(
+            widths.outgoing.round().max(minimum),
+            widths.incoming.round().max(minimum),
+        )),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PagePlan {
@@ -34,6 +232,29 @@ struct IslandLayout {
     capsule: Rect,
     indicator: Option<(Rect, String)>,
     markers: Vec<MarkerLayout>,
+}
+
+struct AnimatedIslandLayout {
+    from: IslandLayout,
+    to: IslandLayout,
+    display: IslandDisplayConfig,
+    widths: ParticipantWidths,
+    capsule_total: f32,
+    fixed_width: f32,
+    outgoing_activation: f32,
+    incoming_activation: f32,
+    outgoing_velocity: f32,
+    incoming_velocity: f32,
+    at_from: bool,
+    at_to: bool,
+}
+
+struct AnimationEndpoints {
+    display: IslandDisplayConfig,
+    from: IslandLayout,
+    to: IslandLayout,
+    settled_from: ParticipantWidths,
+    settled_to: ParticipantWidths,
 }
 
 fn digits(value: usize) -> usize {
@@ -115,13 +336,24 @@ fn page_plan(
     }
 }
 
+#[cfg(test)]
 fn marker_text(
     ws: &crate::workspace::Workspace,
     tab_idx: usize,
     display: IslandDisplayConfig,
     caps: IslandCapsConfig,
 ) -> String {
-    let active = tab_idx == ws.active_tab;
+    marker_text_for_active(ws, tab_idx, ws.active_tab, display, caps)
+}
+
+fn marker_text_for_active(
+    ws: &crate::workspace::Workspace,
+    tab_idx: usize,
+    active_tab: usize,
+    display: IslandDisplayConfig,
+    caps: IslandCapsConfig,
+) -> String {
+    let active = tab_idx == active_tab;
     if !active
         && caps == IslandCapsConfig::Round
         && matches!(
@@ -169,6 +401,19 @@ fn layout_for_display(
     area: Rect,
     display: IslandDisplayConfig,
 ) -> Option<IslandLayout> {
+    let active_tab = app
+        .active
+        .and_then(|idx| app.workspaces.get(idx))?
+        .active_tab;
+    layout_for_display_active(app, area, display, active_tab)
+}
+
+fn layout_for_display_active(
+    app: &AppState,
+    area: Rect,
+    display: IslandDisplayConfig,
+    active_tab: usize,
+) -> Option<IslandLayout> {
     if area.width == 0 || area.height == 0 {
         return None;
     }
@@ -179,14 +424,19 @@ fn layout_for_display(
 
     let page = page_plan(
         ws.tabs.len(),
-        ws.active_tab,
+        active_tab,
         usize::from(area.width),
         display,
         app.island.caps,
     );
     let page_end = (page.start + page.page_size).min(ws.tabs.len());
     let marker_texts = (page.start..page_end)
-        .map(|tab_idx| (tab_idx, marker_text(ws, tab_idx, display, app.island.caps)))
+        .map(|tab_idx| {
+            (
+                tab_idx,
+                marker_text_for_active(ws, tab_idx, active_tab, display, app.island.caps),
+            )
+        })
         .collect::<Vec<_>>();
     let marker_width = marker_texts
         .iter()
@@ -195,12 +445,12 @@ fn layout_for_display(
         + marker_texts.len().saturating_sub(1) * MARKER_GAP
         + caps_width(app.island.caps);
     let first_marker_has_cap = marker_texts.first().is_some_and(|(tab_idx, _)| {
-        *tab_idx == ws.active_tab
+        *tab_idx == active_tab
             || (app.island.caps == IslandCapsConfig::Round
                 && display == IslandDisplayConfig::Numbers)
     });
     let last_marker_has_cap = marker_texts.last().is_some_and(|(tab_idx, _)| {
-        *tab_idx == ws.active_tab
+        *tab_idx == active_tab
             || (app.island.caps == IslandCapsConfig::Round
                 && display == IslandDisplayConfig::Numbers)
     });
@@ -238,7 +488,7 @@ fn layout_for_display(
         if offset > 0 {
             x += MARKER_GAP as u16;
         }
-        let active = tab_idx == ws.active_tab;
+        let active = tab_idx == active_tab;
         if active && round_caps {
             x += 1;
         }
@@ -268,6 +518,232 @@ fn layout(app: &AppState, area: Rect) -> Option<IslandLayout> {
     })
 }
 
+fn marker_visual_width(
+    layout: &IslandLayout,
+    tab_idx: usize,
+    active_tab: usize,
+    caps: IslandCapsConfig,
+) -> Option<f32> {
+    let marker = layout
+        .markers
+        .iter()
+        .find(|marker| marker.tab_idx == tab_idx)?;
+    let cap_width = if caps == IslandCapsConfig::Round && tab_idx == active_tab {
+        2.0
+    } else {
+        0.0
+    };
+    Some(f32::from(marker.rect.width) + cap_width)
+}
+
+fn animation_endpoints(
+    app: &AppState,
+    area: Rect,
+    from_tab: usize,
+    to_tab: usize,
+) -> Option<AnimationEndpoints> {
+    let endpoint_layouts = |display: IslandDisplayConfig| {
+        let from = layout_for_display_active(app, area, display, from_tab)?;
+        let to = layout_for_display_active(app, area, display, to_tab)?;
+        from.markers
+            .iter()
+            .map(|marker| marker.tab_idx)
+            .eq(to.markers.iter().map(|marker| marker.tab_idx))
+            .then_some((from, to))
+    };
+    let (display, (from, to)) = endpoint_layouts(app.island.display)
+        .map(|layouts| (app.island.display, layouts))
+        .or_else(|| match app.island.display {
+            IslandDisplayConfig::Labels => {
+                endpoint_layouts(IslandDisplayConfig::Dots).map(|layouts| {
+                    tracing::debug!(
+                        "island labels animation fell back to dots geometry \
+                         (mismatched page membership between endpoints)"
+                    );
+                    (IslandDisplayConfig::Dots, layouts)
+                })
+            }
+            _ => None,
+        })?;
+    let settled_from = ParticipantWidths::new(
+        marker_visual_width(&from, from_tab, from_tab, app.island.caps)?,
+        marker_visual_width(&from, to_tab, from_tab, app.island.caps)?,
+    );
+    let settled_to = ParticipantWidths::new(
+        marker_visual_width(&to, from_tab, to_tab, app.island.caps)?,
+        marker_visual_width(&to, to_tab, to_tab, app.island.caps)?,
+    );
+    Some(AnimationEndpoints {
+        display,
+        from,
+        to,
+        settled_from,
+        settled_to,
+    })
+}
+
+pub(crate) fn island_animation_for_tab_change(
+    app: &AppState,
+    area: Rect,
+    from_tab: usize,
+    to_tab: usize,
+) -> Option<IslandAnim> {
+    let endpoints = animation_endpoints(app, area, from_tab, to_tab)?;
+    let (mut outgoing_width, mut incoming_width, mut capsule_total) =
+        if let Some(current) = app.island_anim.filter(|anim| anim.to_tab == from_tab) {
+            // Springs carry per-tab visual state: the old incoming spring is
+            // the new outgoing tab's own geometry. The old outgoing spring
+            // belongs to the tab we were leaving, so it only carries over when
+            // reversing back to that tab; a third tab's marker has been
+            // rendered settled all along and starts from its actual geometry.
+            let incoming_width = if current.from_tab == to_tab {
+                current.outgoing_width
+            } else {
+                IslandSpring::new(
+                    endpoints.settled_from.incoming,
+                    endpoints.settled_to.incoming,
+                )
+            };
+            (
+                current.incoming_width,
+                incoming_width,
+                current.capsule_total,
+            )
+        } else {
+            (
+                IslandSpring::new(
+                    endpoints.settled_from.outgoing,
+                    endpoints.settled_to.outgoing,
+                ),
+                IslandSpring::new(
+                    endpoints.settled_from.incoming,
+                    endpoints.settled_to.incoming,
+                ),
+                IslandSpring::new(endpoints.settled_from.total(), endpoints.settled_to.total()),
+            )
+        };
+    outgoing_width.retarget(endpoints.settled_to.outgoing);
+    incoming_width.retarget(endpoints.settled_to.incoming);
+    capsule_total.retarget(endpoints.settled_to.total());
+    quantized_participant_widths(
+        endpoints.display,
+        app.island.caps,
+        ParticipantWidths::new(outgoing_width.position, incoming_width.position),
+    )?;
+    Some(IslandAnim {
+        from_tab,
+        to_tab,
+        display: endpoints.display,
+        page_start: endpoints
+            .from
+            .markers
+            .first()
+            .map_or(0, |marker| marker.tab_idx),
+        page_len: endpoints.from.markers.len(),
+        outgoing_width,
+        incoming_width,
+        capsule_total,
+    })
+}
+
+fn activation(position: f32, inactive: f32, active: f32) -> f32 {
+    if (active - inactive).abs() <= f32::EPSILON {
+        return 1.0;
+    }
+    normalized_progress((position - inactive) / (active - inactive))
+}
+
+fn layout_animated(app: &AppState, area: Rect) -> Option<AnimatedIslandLayout> {
+    let anim = app.island_anim?;
+    let endpoints = animation_endpoints(app, area, anim.from_tab, anim.to_tab)?;
+    // A mid-flight geometry change (e.g. a resize paginating labels apart so
+    // the endpoints fall back to dots) must not flip display modes on screen:
+    // cut the animated overlay and render settled; the springs settle quietly.
+    if endpoints.display != anim.display {
+        return None;
+    }
+    // Same for a resize that changes the page plan (markers leaving the page,
+    // the indicator appearing): the springs were tuned to the starting page's
+    // geometry, so render settled instead of jumping the capsule.
+    if endpoints
+        .from
+        .markers
+        .first()
+        .map_or(0, |marker| marker.tab_idx)
+        != anim.page_start
+        || endpoints.from.markers.len() != anim.page_len
+    {
+        return None;
+    }
+    // The non-participant width (caps, conditional endpoint padding, other
+    // markers, indicator) can differ between the from- and to-layouts —
+    // e.g. the pill moving to an edge flips the flush/clearance padding.
+    // Interpolate it on the capsule spring's own travel so the animated
+    // width lands exactly on the settled-to capsule, never snapping.
+    let fixed_from = f32::from(endpoints.from.capsule.width) - endpoints.settled_from.total();
+    let fixed_to = f32::from(endpoints.to.capsule.width) - endpoints.settled_to.total();
+    // Dots/numbers moves between an edge and an interior tab conserve the
+    // participant total while the conditional endpoint padding still differs,
+    // so the capsule spring's range can be zero-length and its activation
+    // degenerates to 1.0. Fall back to a participant spring's travel so the
+    // fixed width keeps interpolating instead of jumping a cell.
+    let progress_sources = [
+        (
+            anim.capsule_total.position,
+            endpoints.settled_from.total(),
+            endpoints.settled_to.total(),
+        ),
+        (
+            anim.incoming_width.position,
+            endpoints.settled_from.incoming,
+            endpoints.settled_to.incoming,
+        ),
+        (
+            anim.outgoing_width.position,
+            endpoints.settled_from.outgoing,
+            endpoints.settled_to.outgoing,
+        ),
+    ];
+    let fixed_progress = progress_sources
+        .into_iter()
+        .find(|(_, from, to)| (to - from).abs() > f32::EPSILON)
+        .map_or(1.0, |(position, from, to)| activation(position, from, to));
+    let fixed_width = lerp(fixed_from, fixed_to, fixed_progress);
+    let widths = ParticipantWidths::new(anim.outgoing_width.position, anim.incoming_width.position);
+    let quantized_widths =
+        quantized_participant_widths(endpoints.display, app.island.caps, widths)?;
+    let outgoing_activation = activation(
+        widths.outgoing,
+        endpoints.settled_to.outgoing,
+        endpoints.settled_from.outgoing,
+    );
+    let incoming_activation = activation(
+        widths.incoming,
+        endpoints.settled_from.incoming,
+        endpoints.settled_to.incoming,
+    );
+    let matches = |actual: f32, expected: f32| (actual - expected).abs() <= f32::EPSILON;
+
+    Some(AnimatedIslandLayout {
+        from: endpoints.from,
+        to: endpoints.to,
+        display: endpoints.display,
+        widths: quantized_widths,
+        capsule_total: anim.capsule_total.position,
+        fixed_width,
+        outgoing_activation,
+        incoming_activation,
+        outgoing_velocity: anim.outgoing_width.velocity,
+        incoming_velocity: anim.incoming_width.velocity,
+        at_from: matches(widths.outgoing, endpoints.settled_from.outgoing)
+            && matches(widths.incoming, endpoints.settled_from.incoming)
+            && matches(anim.capsule_total.position, endpoints.settled_from.total()),
+        at_to: matches(widths.outgoing, endpoints.settled_to.outgoing)
+            && matches(widths.incoming, endpoints.settled_to.incoming)
+            && matches(anim.capsule_total.position, endpoints.settled_to.total()),
+    })
+}
+
 pub(super) fn compute_tab_bar_view(app: &AppState, area: Rect) -> TabBarView {
     let Some(layout) = layout(app, area) else {
         return TabBarView::default();
@@ -287,19 +763,22 @@ pub(super) fn compute_tab_bar_view(app: &AppState, area: Rect) -> TabBarView {
     }
 }
 
-pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
-    if area.width == 0 || area.height == 0 {
-        return;
+fn positional_fg(app: &AppState, tab_idx: usize, active_tab: usize) -> Color {
+    if tab_idx < active_tab {
+        app.palette.overlay1
+    } else {
+        app.palette.overlay0
     }
-    let p = &app.palette;
-    frame.render_widget(
-        Paragraph::new(" ".repeat(area.width as usize)).style(Style::default().bg(p.panel_bg)),
-        area,
-    );
+}
 
-    let Some(layout) = layout(app, area) else {
-        return;
-    };
+fn render_settled_layout(
+    app: &AppState,
+    frame: &mut Frame,
+    layout: &IslandLayout,
+    active_tab: usize,
+    display: IslandDisplayConfig,
+) {
+    let p = &app.palette;
     let round_caps = app.island.caps == IslandCapsConfig::Round;
     let capsule_body = if round_caps {
         Rect::new(
@@ -325,38 +804,32 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
             .set_style(Style::default().fg(p.surface0).bg(p.panel_bg));
     }
 
-    if let Some((rect, text)) = layout.indicator {
+    if let Some((rect, text)) = &layout.indicator {
         frame.render_widget(
-            Paragraph::new(text).style(Style::default().fg(p.overlay0).bg(p.surface0)),
-            rect,
+            Paragraph::new(text.as_str()).style(Style::default().fg(p.overlay0).bg(p.surface0)),
+            *rect,
         );
     }
 
-    let active_tab = app
-        .active
-        .and_then(|idx| app.workspaces.get(idx))
-        .map(|ws| ws.active_tab);
-    for marker in layout.markers {
-        let active = active_tab == Some(marker.tab_idx);
+    for marker in &layout.markers {
+        let active = active_tab == marker.tab_idx;
         let inactive_number_stadium =
-            !active && round_caps && app.island.display == IslandDisplayConfig::Numbers;
-        let positional_fg = if active_tab.is_some_and(|active| marker.tab_idx < active) {
-            p.overlay1
-        } else {
-            p.overlay0
-        };
+            !active && round_caps && display == IslandDisplayConfig::Numbers;
         let style = if active {
             Style::default().fg(panel_contrast_fg(p)).bg(p.accent)
         } else {
             Style::default()
-                .fg(positional_fg)
+                .fg(positional_fg(app, marker.tab_idx, active_tab))
                 .bg(if inactive_number_stadium {
                     p.surface1
                 } else {
                     p.surface0
                 })
         };
-        frame.render_widget(Paragraph::new(marker.text).style(style), marker.rect);
+        frame.render_widget(
+            Paragraph::new(marker.text.as_str()).style(style),
+            marker.rect,
+        );
         if inactive_number_stadium {
             let cap_style = Style::default().fg(p.surface1).bg(p.surface0);
             frame.buffer_mut()[(marker.rect.x, marker.rect.y)]
@@ -377,10 +850,353 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
     }
 }
 
+fn render_capsule(
+    frame: &mut Frame,
+    rect: Rect,
+    caps: IslandCapsConfig,
+    fill: Color,
+    under: Color,
+) {
+    if rect.width == 0 {
+        return;
+    }
+    if caps == IslandCapsConfig::Round {
+        if rect.width < 2 {
+            return;
+        }
+        frame.buffer_mut()[(rect.x, rect.y)]
+            .set_symbol(LEFT_CAP)
+            .set_style(Style::default().fg(fill).bg(under));
+        frame.buffer_mut()[(rect.right() - 1, rect.y)]
+            .set_symbol(RIGHT_CAP)
+            .set_style(Style::default().fg(fill).bg(under));
+        for x in rect.x + 1..rect.right() - 1 {
+            frame.buffer_mut()[(x, rect.y)]
+                .set_symbol(" ")
+                .set_style(Style::default().bg(fill));
+        }
+    } else {
+        for x in rect.x..rect.right() {
+            frame.buffer_mut()[(x, rect.y)]
+                .set_symbol(" ")
+                .set_style(Style::default().bg(fill));
+        }
+    }
+}
+
+fn marker_visual_start(marker: &MarkerLayout, active_tab: usize, caps: IslandCapsConfig) -> f32 {
+    f32::from(marker.rect.x)
+        - if caps == IslandCapsConfig::Round && marker.tab_idx == active_tab {
+            1.0
+        } else {
+            0.0
+        }
+}
+
+fn animated_participant_rect(
+    app: &AppState,
+    animated: &AnimatedIslandLayout,
+    tab_idx: usize,
+    width: f32,
+) -> Option<Rect> {
+    let anim = app.island_anim?;
+    let from = animated
+        .from
+        .markers
+        .iter()
+        .find(|marker| marker.tab_idx == tab_idx)?;
+    let to = animated
+        .to
+        .markers
+        .iter()
+        .find(|marker| marker.tab_idx == tab_idx)?;
+    let x = lerp(
+        marker_visual_start(from, anim.from_tab, app.island.caps),
+        marker_visual_start(to, anim.to_tab, app.island.caps),
+        if tab_idx == anim.from_tab {
+            1.0 - animated.outgoing_activation
+        } else {
+            animated.incoming_activation
+        },
+    );
+    let x = x.round() as u16;
+    Some(Rect::new(x, animated.from.capsule.y, width as u16, 1))
+}
+
+fn render_animated_content(
+    app: &AppState,
+    frame: &mut Frame,
+    display: IslandDisplayConfig,
+    tab_idx: usize,
+    rect: Rect,
+    fill: Color,
+) {
+    if display == IslandDisplayConfig::Dots {
+        return;
+    }
+    let Some(ws) = app.active.and_then(|idx| app.workspaces.get(idx)) else {
+        return;
+    };
+    let text = marker_text_for_active(ws, tab_idx, tab_idx, display, app.island.caps);
+    let text_width = display_width_u16(&text);
+    let cap_width = u16::from(app.island.caps == IslandCapsConfig::Round);
+    let left = rect.x + cap_width;
+    let right = rect.right().saturating_sub(cap_width);
+    if right.saturating_sub(left) < text_width {
+        return;
+    }
+    let x = left + (right - left - text_width) / 2;
+    frame.render_widget(
+        Paragraph::new(text).style(
+            Style::default()
+                .fg(panel_contrast_fg(&app.palette))
+                .bg(fill),
+        ),
+        Rect::new(x, rect.y, text_width, 1),
+    );
+}
+
+fn render_animated_layout(
+    app: &AppState,
+    frame: &mut Frame,
+    area: Rect,
+    animated: &AnimatedIslandLayout,
+) {
+    let Some(anim) = app.island_anim else {
+        return;
+    };
+    let p = &app.palette;
+    let crossfade = app.island.motion == IslandMotionConfig::Smooth;
+    let capsule_width = (animated.fixed_width + animated.capsule_total)
+        .round()
+        .clamp(1.0, f32::from(area.width)) as u16;
+    let capsule_x = match app.island.position {
+        IslandPositionConfig::Center => area.x + area.width.saturating_sub(capsule_width) / 2,
+        IslandPositionConfig::Left => area.x,
+    };
+    render_capsule(
+        frame,
+        Rect::new(capsule_x, area.y, capsule_width, 1),
+        app.island.caps,
+        p.surface0,
+        p.panel_bg,
+    );
+
+    if let (Some((from_rect, _)), Some((to_rect, text))) =
+        (&animated.from.indicator, &animated.to.indicator)
+    {
+        let x = lerp(
+            f32::from(from_rect.x),
+            f32::from(to_rect.x),
+            animated.incoming_activation,
+        )
+        .round() as u16;
+        frame.render_widget(
+            Paragraph::new(text.as_str()).style(Style::default().fg(p.overlay0).bg(p.surface0)),
+            Rect::new(x, area.y, to_rect.width, 1),
+        );
+    }
+
+    for (from, to) in animated.from.markers.iter().zip(&animated.to.markers) {
+        if from.tab_idx == anim.from_tab || from.tab_idx == anim.to_tab {
+            continue;
+        }
+        let x = lerp(
+            f32::from(from.rect.x),
+            f32::from(to.rect.x),
+            animated.incoming_activation,
+        )
+        .round() as u16;
+        let inactive_number_stadium = app.island.caps == IslandCapsConfig::Round
+            && animated.display == IslandDisplayConfig::Numbers;
+        let bg = if inactive_number_stadium {
+            p.surface1
+        } else {
+            p.surface0
+        };
+        let rect = Rect::new(x, area.y, to.rect.width, 1);
+        frame.render_widget(
+            Paragraph::new(to.text.as_str()).style(
+                Style::default()
+                    .fg(positional_fg(app, to.tab_idx, anim.to_tab))
+                    .bg(bg),
+            ),
+            rect,
+        );
+        if inactive_number_stadium {
+            let cap_style = Style::default().fg(p.surface1).bg(p.surface0);
+            frame.buffer_mut()[(rect.x, rect.y)]
+                .set_symbol(LEFT_CAP)
+                .set_style(cap_style);
+            frame.buffer_mut()[(rect.right() - 1, rect.y)]
+                .set_symbol(RIGHT_CAP)
+                .set_style(cap_style);
+        }
+    }
+
+    let Some(outgoing_rect) =
+        animated_participant_rect(app, animated, anim.from_tab, animated.widths.outgoing)
+    else {
+        return;
+    };
+    let Some(incoming_rect) =
+        animated_participant_rect(app, animated, anim.to_tab, animated.widths.incoming)
+    else {
+        return;
+    };
+    let outgoing_tone = positional_fg(app, anim.from_tab, anim.to_tab);
+    let incoming_tone = positional_fg(app, anim.to_tab, anim.from_tab);
+    let host_theme = &app.host_terminal_theme;
+    // "reset"-aliased tones have no channels when the host never reported its
+    // default foreground (Windows skips the OSC 10/4 query entirely), which
+    // would hold the from-color for the whole crossfade and pop at the end.
+    // Approximate with the theme's own text token for the blend — and when
+    // that is itself "reset", with the appearance-matched stock foreground —
+    // so the chain always ends concrete. Settled frames still paint the
+    // genuine Reset.
+    let resolve_reset = |color: Color| {
+        if color != Color::Reset || host_theme.foreground.is_some() {
+            return color;
+        }
+        if p.text != Color::Reset {
+            return p.text;
+        }
+        let (r, g, b) = stock_palette_channels(match app.host_terminal_appearance {
+            Some(crate::terminal_theme::HostAppearance::Light) => 0,
+            _ => 7,
+        });
+        Color::Rgb(r, g, b)
+    };
+    // The accent fills the pill body's background, so a reset accent means the
+    // terminal's default background — resolve it with background semantics
+    // (host-reported background, then the theme's panel token, then the
+    // appearance-matched stock background) rather than the foreground chain.
+    let resolve_reset_accent = |color: Color| {
+        if color != Color::Reset {
+            return color;
+        }
+        if let Some(rgb) = host_theme.background {
+            return Color::Rgb(rgb.r, rgb.g, rgb.b);
+        }
+        if p.panel_bg != Color::Reset {
+            return p.panel_bg;
+        }
+        let (r, g, b) = stock_palette_channels(match app.host_terminal_appearance {
+            Some(crate::terminal_theme::HostAppearance::Light) => 15,
+            _ => 0,
+        });
+        Color::Rgb(r, g, b)
+    };
+    let (outgoing_fill, incoming_fill) = if crossfade {
+        (
+            brighten(
+                lerp_hsl(
+                    resolve_reset(outgoing_tone),
+                    resolve_reset_accent(p.accent),
+                    animated.outgoing_activation,
+                    host_theme,
+                ),
+                animated.outgoing_velocity,
+                host_theme,
+            ),
+            brighten(
+                lerp_hsl(
+                    resolve_reset(incoming_tone),
+                    resolve_reset_accent(p.accent),
+                    animated.incoming_activation,
+                    host_theme,
+                ),
+                animated.incoming_velocity,
+                host_theme,
+            ),
+        )
+    } else if animated_content_visible(animated.incoming_activation) {
+        (outgoing_tone, p.accent)
+    } else {
+        (p.accent, incoming_tone)
+    };
+    render_capsule(
+        frame,
+        outgoing_rect,
+        app.island.caps,
+        outgoing_fill,
+        p.surface0,
+    );
+    render_capsule(
+        frame,
+        incoming_rect,
+        app.island.caps,
+        incoming_fill,
+        p.surface0,
+    );
+    if animated_content_visible(animated.outgoing_activation) {
+        render_animated_content(
+            app,
+            frame,
+            animated.display,
+            anim.from_tab,
+            outgoing_rect,
+            outgoing_fill,
+        );
+    }
+    if animated_content_visible(animated.incoming_activation) {
+        render_animated_content(
+            app,
+            frame,
+            animated.display,
+            anim.to_tab,
+            incoming_rect,
+            incoming_fill,
+        );
+    }
+}
+
+pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    frame.render_widget(
+        Paragraph::new(" ".repeat(area.width as usize))
+            .style(Style::default().bg(app.palette.panel_bg)),
+        area,
+    );
+
+    let animated = if app.island_anim.is_some() && app.island.motion != IslandMotionConfig::Off {
+        layout_animated(app, area)
+    } else {
+        None
+    };
+    if let Some(animated) = animated {
+        let Some(anim) = app.island_anim else {
+            return;
+        };
+        if animated.at_from {
+            render_settled_layout(app, frame, &animated.from, anim.from_tab, animated.display);
+        } else if animated.at_to {
+            render_settled_layout(app, frame, &animated.to, anim.to_tab, animated.display);
+        } else {
+            render_animated_layout(app, frame, area, &animated);
+        }
+        return;
+    }
+
+    let Some(layout) = layout(app, area) else {
+        return;
+    };
+    let Some(active_tab) = app
+        .active
+        .and_then(|idx| app.workspaces.get(idx))
+        .map(|ws| ws.active_tab)
+    else {
+        return;
+    };
+    render_settled_layout(app, frame, &layout, active_tab, app.island.display);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::state::AppState;
+    use crate::app::state::{AppState, IslandAnim};
     use crate::workspace::Workspace;
     use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
 
@@ -400,6 +1216,727 @@ mod tests {
         (rect.x..rect.x + rect.width)
             .map(|x| buffer[(x, rect.y)].symbol())
             .collect()
+    }
+
+    fn rendered_buffer(app: &AppState, area: Rect) -> Buffer {
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| render_tab_bar(app, frame, area))
+            .expect("draw island");
+        terminal.backend().buffer().clone()
+    }
+
+    fn animated_app(
+        display: IslandDisplayConfig,
+        motion: IslandMotionConfig,
+        area: Rect,
+    ) -> AppState {
+        let mut app = app_with_tabs(2, 1);
+        app.island.display = display;
+        app.island.motion = motion;
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        app
+    }
+
+    fn set_spring_frame(
+        app: &mut AppState,
+        outgoing: f32,
+        incoming: f32,
+        capsule_total: f32,
+        outgoing_velocity: f32,
+        incoming_velocity: f32,
+    ) {
+        let anim = app.island_anim.as_mut().expect("animation state");
+        anim.outgoing_width.position = outgoing;
+        anim.outgoing_width.velocity = outgoing_velocity;
+        anim.incoming_width.position = incoming;
+        anim.incoming_width.velocity = incoming_velocity;
+        anim.capsule_total.position = capsule_total;
+    }
+
+    #[test]
+    fn hsl_lerp_preserves_endpoints_and_crosses_the_short_hue_arc() {
+        let from = Color::Rgb(255, 0, 0);
+        let to = Color::Rgb(0, 255, 0);
+        let host = crate::terminal_theme::TerminalTheme::default();
+
+        assert_eq!(lerp_hsl(from, to, 0.0, &host), from);
+        assert_eq!(lerp_hsl(from, to, 0.5, &host), Color::Rgb(255, 255, 0));
+        assert_eq!(lerp_hsl(from, to, 1.0, &host), to);
+        assert_eq!(brighten(from, 0.0, &host), from);
+        assert_eq!(
+            brighten(Color::Rgb(100, 100, 100), 100.0, &host),
+            Color::Rgb(108, 108, 108)
+        );
+    }
+
+    #[test]
+    fn conserved_total_moves_still_interpolate_the_fixed_width() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 1);
+        app.island.display = IslandDisplayConfig::Dots;
+        app.island.motion = IslandMotionConfig::Smooth;
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        assert!(app.island_anim.is_some(), "edge-to-interior move animates");
+
+        let endpoints = animation_endpoints(&app, area, 0, 1).expect("endpoints");
+        let settled_from = endpoints.settled_from;
+        let settled_to = endpoints.settled_to;
+        assert!(
+            (settled_from.total() - settled_to.total()).abs() <= f32::EPSILON,
+            "fixture must conserve the participant total (got {} -> {})",
+            settled_from.total(),
+            settled_to.total()
+        );
+        let fixed_from = f32::from(endpoints.from.capsule.width) - settled_from.total();
+        let fixed_to = f32::from(endpoints.to.capsule.width) - settled_to.total();
+        assert!(
+            (fixed_from - fixed_to).abs() > f32::EPSILON,
+            "fixture must exercise differing endpoint padding ({fixed_from} vs {fixed_to})"
+        );
+
+        set_spring_frame(
+            &mut app,
+            (settled_from.outgoing + settled_to.outgoing) / 2.0,
+            (settled_from.incoming + settled_to.incoming) / 2.0,
+            settled_from.total(),
+            0.0,
+            0.0,
+        );
+        let animated = layout_animated(&app, area).expect("animated layout");
+        let expected = (fixed_from + fixed_to) / 2.0;
+        assert!(
+            (animated.fixed_width - expected).abs() <= 0.01,
+            "fixed width must interpolate on participant travel when the capsule \
+             range is degenerate: got {}, want {expected}",
+            animated.fixed_width
+        );
+    }
+
+    #[test]
+    fn rapid_retarget_reuses_springs_only_for_the_tab_they_represent() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 1);
+        app.island.display = IslandDisplayConfig::Labels;
+        app.island.motion = IslandMotionConfig::Smooth;
+        for (idx, label) in ["aa", "beeeeee", "c"].iter().enumerate() {
+            app.workspaces[0].tabs[idx].set_custom_name((*label).into());
+        }
+
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        let mid = {
+            let anim = app.island_anim.as_mut().expect("first animation");
+            anim.outgoing_width.position += 0.4;
+            anim.outgoing_width.velocity = -3.0;
+            anim.incoming_width.position += 0.3;
+            anim.incoming_width.velocity = 2.5;
+            *anim
+        };
+
+        // Onward to a third tab: the shared pill spring carries, but the
+        // third tab starts from its own settled geometry, not the departed
+        // tab's mid-flight spring.
+        app.workspaces[0].switch_tab(2);
+        let onward = island_animation_for_tab_change(&app, area, 1, 2).expect("onward animation");
+        let onward_endpoints = animation_endpoints(&app, area, 1, 2).expect("onward endpoints");
+        assert_eq!(
+            (
+                onward.outgoing_width.position,
+                onward.outgoing_width.velocity
+            ),
+            (mid.incoming_width.position, mid.incoming_width.velocity),
+            "the outgoing tab keeps its own in-flight spring"
+        );
+        assert_eq!(
+            (
+                onward.incoming_width.position,
+                onward.incoming_width.velocity
+            ),
+            (onward_endpoints.settled_from.incoming, 0.0),
+            "a third tab starts from its actual settled geometry"
+        );
+
+        // Reversing back reuses the departed tab's own spring.
+        app.workspaces[0].switch_tab(0);
+        app.island_anim = Some(mid);
+        let reversed =
+            island_animation_for_tab_change(&app, area, 1, 0).expect("reversed animation");
+        assert_eq!(
+            (
+                reversed.incoming_width.position,
+                reversed.incoming_width.velocity
+            ),
+            (mid.outgoing_width.position, mid.outgoing_width.velocity),
+            "reversal continues the original tab's spring"
+        );
+    }
+
+    #[test]
+    fn two_immediate_switches_cut_an_under_width_animation() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 0);
+        app.island.display = IslandDisplayConfig::Dots;
+        app.island.caps = IslandCapsConfig::Round;
+        app.island.motion = IslandMotionConfig::Smooth;
+
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        app.workspaces[0].switch_tab(1);
+        app.island_anim = island_animation_for_tab_change(&app, area, 1, 2);
+        app.workspaces[0].switch_tab(2);
+
+        assert!(app.island_anim.is_none());
+        let mut settled = app_with_tabs(3, 2);
+        settled.island = app.island;
+        assert_eq!(rendered_buffer(&app, area), rendered_buffer(&settled, area));
+    }
+
+    #[test]
+    fn mid_flight_display_fallback_cuts_the_animated_overlay() {
+        let wide = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 1);
+        app.island.display = IslandDisplayConfig::Labels;
+        app.island.motion = IslandMotionConfig::Smooth;
+        for (idx, label) in ["alpha-one-long", "beta-two-long", "gamma-three-long"]
+            .iter()
+            .enumerate()
+        {
+            app.workspaces[0].tabs[idx].set_custom_name((*label).into());
+        }
+        app.island_anim = island_animation_for_tab_change(&app, wide, 0, 1);
+        let anim = app.island_anim.expect("labels animation");
+        assert_eq!(anim.display, IslandDisplayConfig::Labels);
+        assert!(
+            layout_animated(&app, wide).is_some(),
+            "unchanged geometry keeps animating"
+        );
+
+        // Narrowing paginates the labels apart; the endpoints fall back to
+        // dots geometry, which must cut the overlay instead of flipping
+        // display modes on screen mid-flight.
+        let narrow = Rect::new(0, 0, 30, 1);
+        let narrow_endpoints = animation_endpoints(&app, narrow, 0, 1).expect("fallback endpoints");
+        assert_eq!(
+            narrow_endpoints.display,
+            IslandDisplayConfig::Dots,
+            "fixture must trigger the labels-to-dots fallback"
+        );
+        assert!(layout_animated(&app, narrow).is_none());
+    }
+
+    #[test]
+    fn rapid_double_retarget_before_first_tick_cuts_instead_of_panicking() {
+        // Two next-tab presses inside one tick leave both participants at the
+        // inactive width, so round caps cannot fit on either side.
+        assert_eq!(
+            quantized_participant_widths(
+                IslandDisplayConfig::Dots,
+                IslandCapsConfig::Round,
+                ParticipantWidths::new(1.0, 1.0),
+            ),
+            None
+        );
+
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 1);
+        app.island.display = IslandDisplayConfig::Dots;
+        app.island.caps = IslandCapsConfig::Round;
+        app.island.motion = IslandMotionConfig::Smooth;
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        assert!(app.island_anim.is_some(), "first switch animates");
+        app.workspaces[0].switch_tab(2);
+        app.island_anim = island_animation_for_tab_change(&app, area, 1, 2);
+        assert!(
+            app.island_anim.is_none(),
+            "an under-width onward retarget is refused at creation"
+        );
+        // Rendering after the refused retarget must not panic.
+        let _ = rendered_buffer(&app, area);
+    }
+
+    #[test]
+    fn page_plan_change_on_resize_cuts_the_animated_overlay() {
+        let wide = Rect::new(0, 0, 60, 1);
+        let mut app = app_with_tabs(8, 1);
+        app.island.display = IslandDisplayConfig::Dots;
+        app.island.motion = IslandMotionConfig::Smooth;
+        app.island_anim = island_animation_for_tab_change(&app, wide, 0, 1);
+        let anim = app.island_anim.expect("animation");
+        assert!(
+            layout_animated(&app, wide).is_some(),
+            "unchanged geometry keeps animating"
+        );
+
+        // Narrowing shrinks the page: markers leave, the indicator appears,
+        // but both endpoints stay in the same block and the display stays
+        // dots — the page-plan guard must still cut the overlay.
+        let narrow = Rect::new(0, 0, 20, 1);
+        let narrow_endpoints = animation_endpoints(&app, narrow, 0, 1).expect("narrow endpoints");
+        assert_eq!(narrow_endpoints.display, IslandDisplayConfig::Dots);
+        assert!(
+            narrow_endpoints.from.markers.len() != anim.page_len
+                || narrow_endpoints
+                    .from
+                    .markers
+                    .first()
+                    .map_or(0, |marker| marker.tab_idx)
+                    != anim.page_start,
+            "fixture must change the page plan"
+        );
+        assert!(layout_animated(&app, narrow).is_none());
+    }
+
+    #[test]
+    fn reset_tones_crossfade_via_theme_text_when_host_fg_is_unreported() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = animated_app(IslandDisplayConfig::Dots, IslandMotionConfig::Smooth, area);
+        app.palette.overlay0 = Color::Reset;
+        app.palette.overlay1 = Color::Reset;
+        app.palette.text = Color::Rgb(210, 200, 190);
+        assert!(app.host_terminal_theme.foreground.is_none());
+        set_spring_frame(&mut app, 3.4, 2.6, 6.0, -20.0, 20.0);
+        let animated = layout_animated(&app, area).expect("animated layout");
+        let anim = app.island_anim.expect("animation state");
+        let incoming =
+            animated_participant_rect(&app, &animated, anim.to_tab, animated.widths.incoming)
+                .expect("incoming participant");
+        let buffer = rendered_buffer(&app, area);
+        let host_theme = &app.host_terminal_theme;
+        let expected = brighten(
+            lerp_hsl(
+                app.palette.text,
+                app.palette.accent,
+                animated.incoming_activation,
+                host_theme,
+            ),
+            animated.incoming_velocity,
+            host_theme,
+        );
+        assert!(
+            matches!(expected, Color::Rgb(..)),
+            "fixture must produce a concrete blend"
+        );
+        assert_eq!(
+            buffer[(incoming.x, incoming.y)].style().fg,
+            Some(expected),
+            "reset tones blend through the theme text token instead of popping"
+        );
+    }
+
+    #[test]
+    fn reset_tones_blend_via_stock_foreground_when_theme_text_is_also_reset() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = animated_app(IslandDisplayConfig::Dots, IslandMotionConfig::Smooth, area);
+        app.palette.overlay0 = Color::Reset;
+        app.palette.overlay1 = Color::Reset;
+        app.palette.text = Color::Reset;
+        assert!(app.host_terminal_theme.foreground.is_none());
+        assert!(app.host_terminal_appearance.is_none());
+        set_spring_frame(&mut app, 3.4, 2.6, 6.0, -20.0, 20.0);
+        let animated = layout_animated(&app, area).expect("animated layout");
+        let anim = app.island_anim.expect("animation state");
+        let incoming =
+            animated_participant_rect(&app, &animated, anim.to_tab, animated.widths.incoming)
+                .expect("incoming participant");
+        let buffer = rendered_buffer(&app, area);
+        let host_theme = &app.host_terminal_theme;
+        let (r, g, b) = stock_palette_channels(7);
+        let expected = brighten(
+            lerp_hsl(
+                Color::Rgb(r, g, b),
+                app.palette.accent,
+                animated.incoming_activation,
+                host_theme,
+            ),
+            animated.incoming_velocity,
+            host_theme,
+        );
+        assert!(matches!(expected, Color::Rgb(..)));
+        assert_eq!(
+            buffer[(incoming.x, incoming.y)].style().fg,
+            Some(expected),
+            "an all-reset theme still blends via the stock foreground"
+        );
+    }
+
+    #[test]
+    fn reset_accent_blends_with_background_semantics() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = animated_app(IslandDisplayConfig::Dots, IslandMotionConfig::Smooth, area);
+        app.palette.accent = Color::Reset;
+        let host_bg = crate::terminal_theme::RgbColor {
+            r: 10,
+            g: 10,
+            b: 40,
+        };
+        app.host_terminal_theme.background = Some(host_bg);
+        // A reported foreground must NOT hijack the accent's resolution.
+        app.host_terminal_theme.foreground = Some(crate::terminal_theme::RgbColor {
+            r: 240,
+            g: 240,
+            b: 240,
+        });
+        set_spring_frame(&mut app, 3.4, 2.6, 6.0, -20.0, 20.0);
+        let animated = layout_animated(&app, area).expect("animated layout");
+        let anim = app.island_anim.expect("animation state");
+        let incoming =
+            animated_participant_rect(&app, &animated, anim.to_tab, animated.widths.incoming)
+                .expect("incoming participant");
+        let buffer = rendered_buffer(&app, area);
+        let host_theme = &app.host_terminal_theme;
+        let expected = brighten(
+            lerp_hsl(
+                positional_fg(&app, anim.to_tab, anim.from_tab),
+                Color::Rgb(host_bg.r, host_bg.g, host_bg.b),
+                animated.incoming_activation,
+                host_theme,
+            ),
+            animated.incoming_velocity,
+            host_theme,
+        );
+        assert!(matches!(expected, Color::Rgb(..)));
+        assert_eq!(
+            buffer[(incoming.x, incoming.y)].style().fg,
+            Some(expected),
+            "a reset accent blends toward the host default background, not the foreground"
+        );
+    }
+
+    #[test]
+    fn crossfade_resolves_named_colors_through_the_host_palette() {
+        let host_red = crate::terminal_theme::RgbColor {
+            r: 250,
+            g: 100,
+            b: 50,
+        };
+        let host_fg = crate::terminal_theme::RgbColor {
+            r: 200,
+            g: 200,
+            b: 190,
+        };
+        let mut host = crate::terminal_theme::TerminalTheme::default();
+        host.palette[1] = Some(host_red);
+        host.foreground = Some(host_fg);
+        let unreported = crate::terminal_theme::TerminalTheme::default();
+
+        assert_eq!(
+            color_channels(Color::Red, &host),
+            Some((host_red.r, host_red.g, host_red.b)),
+            "reported palette slots must override the stock palette"
+        );
+        assert_eq!(
+            color_channels(Color::Red, &host),
+            color_channels(Color::Indexed(1), &host),
+            "named ANSI and its index must resolve identically"
+        );
+        assert_eq!(
+            color_channels(Color::Red, &unreported),
+            Some(stock_palette_channels(1)),
+            "unreported slots fall back to the stock ghostty palette"
+        );
+        assert_eq!(
+            color_channels(Color::Reset, &host),
+            Some((host_fg.r, host_fg.g, host_fg.b)),
+            "the reset alias resolves through the host default foreground"
+        );
+        assert_eq!(
+            color_channels(Color::Reset, &unreported),
+            None,
+            "reset stays unresolvable when the host never reported a foreground"
+        );
+        // Endpoint continuity: the first blend step away from the settled frame
+        // must depart from the host's actual color, not a stock approximation.
+        assert_eq!(
+            lerp_hsl(Color::Red, Color::Rgb(0, 0, 255), 0.0, &host),
+            Color::Red
+        );
+        let near_start = lerp_hsl(Color::Red, Color::Rgb(0, 0, 255), 0.001, &host);
+        let Color::Rgb(r, g, b) = near_start else {
+            panic!("blend should produce concrete rgb: {near_start:?}");
+        };
+        assert!(
+            i16::from(r).abs_diff(i16::from(host_red.r)) <= 2
+                && i16::from(g).abs_diff(i16::from(host_red.g)) <= 2
+                && i16::from(b).abs_diff(i16::from(host_red.b)) <= 2,
+            "near-endpoint blend {near_start:?} must stay continuous with the host color {host_red:?}"
+        );
+    }
+
+    #[test]
+    fn animated_content_appears_only_over_sixty_percent() {
+        assert!(!animated_content_visible(0.0));
+        assert!(!animated_content_visible(0.6));
+        assert!(animated_content_visible(0.600_001));
+        assert!(animated_content_visible(1.0));
+    }
+
+    #[test]
+    fn island_animation_state_defaults_unset() {
+        let app = AppState::test_new();
+        assert!(app.island_anim.is_none());
+
+        let anim = IslandAnim {
+            from_tab: 1,
+            to_tab: 2,
+            display: IslandDisplayConfig::Dots,
+            page_start: 0,
+            page_len: 3,
+            outgoing_width: IslandSpring::new(5.0, 1.0),
+            incoming_width: IslandSpring::new(1.0, 5.0),
+            capsule_total: IslandSpring::new(6.0, 6.0),
+        };
+        assert_eq!((anim.from_tab, anim.to_tab), (1, 2));
+    }
+
+    #[test]
+    fn animated_endpoints_are_cell_exact_settled_frames() {
+        let area = Rect::new(0, 0, 80, 1);
+        for display in [
+            IslandDisplayConfig::Dots,
+            IslandDisplayConfig::Numbers,
+            IslandDisplayConfig::Labels,
+        ] {
+            let mut settled_from = app_with_tabs(2, 0);
+            settled_from.island.display = display;
+            let mut settled_to = app_with_tabs(2, 1);
+            settled_to.island.display = display;
+            let animated_from = animated_app(display, IslandMotionConfig::Smooth, area);
+            let mut animated_to = animated_app(display, IslandMotionConfig::Smooth, area);
+            let anim = animated_to.island_anim.as_mut().expect("animation state");
+            anim.outgoing_width.position = anim.outgoing_width.target;
+            anim.incoming_width.position = anim.incoming_width.target;
+            anim.capsule_total.position = anim.capsule_total.target;
+
+            assert_eq!(
+                rendered_buffer(&animated_from, area),
+                rendered_buffer(&settled_from, area),
+                "initial springs must be the settled-from frame for {display:?}"
+            );
+            assert_eq!(
+                rendered_buffer(&animated_to, area),
+                rendered_buffer(&settled_to, area),
+                "target springs must be the settled-to frame for {display:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn smooth_spring_frames_keep_caps_and_apply_hsl_velocity_color() {
+        let area = Rect::new(0, 0, 80, 1);
+        for (display, outgoing, incoming, total, expected_widths) in [
+            (IslandDisplayConfig::Dots, 3.4, 2.6, 6.0, (3, 3)),
+            (IslandDisplayConfig::Numbers, 4.4, 3.6, 8.0, (4, 4)),
+            (IslandDisplayConfig::Labels, 3.4, 4.6, 8.0, (3, 5)),
+        ] {
+            let mut app = animated_app(display, IslandMotionConfig::Smooth, area);
+            set_spring_frame(&mut app, outgoing, incoming, total, -20.0, 20.0);
+            let animated = layout_animated(&app, area).expect("animated layout");
+            let anim = app.island_anim.expect("animation state");
+            let outgoing =
+                animated_participant_rect(&app, &animated, anim.from_tab, animated.widths.outgoing)
+                    .expect("outgoing participant");
+            let incoming =
+                animated_participant_rect(&app, &animated, anim.to_tab, animated.widths.incoming)
+                    .expect("incoming participant");
+            assert_eq!((outgoing.width, incoming.width), expected_widths);
+
+            let buffer = rendered_buffer(&app, area);
+            let host_theme = &app.host_terminal_theme;
+            let outgoing_fill = brighten(
+                lerp_hsl(
+                    positional_fg(&app, anim.from_tab, anim.to_tab),
+                    app.palette.accent,
+                    animated.outgoing_activation,
+                    host_theme,
+                ),
+                animated.outgoing_velocity,
+                host_theme,
+            );
+            let incoming_fill = brighten(
+                lerp_hsl(
+                    positional_fg(&app, anim.to_tab, anim.from_tab),
+                    app.palette.accent,
+                    animated.incoming_activation,
+                    host_theme,
+                ),
+                animated.incoming_velocity,
+                host_theme,
+            );
+            for (rect, fill) in [(outgoing, outgoing_fill), (incoming, incoming_fill)] {
+                assert_eq!(buffer[(rect.x, rect.y)].symbol(), LEFT_CAP, "{display:?}");
+                assert_eq!(
+                    buffer[(rect.right() - 1, rect.y)].symbol(),
+                    RIGHT_CAP,
+                    "{display:?}"
+                );
+                for x in [rect.x, rect.right() - 1] {
+                    let style = buffer[(x, rect.y)].style();
+                    assert_eq!(style.fg, Some(fill), "{display:?}");
+                    assert_eq!(style.bg, Some(app.palette.surface0), "{display:?}");
+                }
+                if rect.width > 2 {
+                    assert_eq!(buffer[(rect.x + 1, rect.y)].style().bg, Some(fill));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn animated_frame_sweep_never_renders_bare_participant_rects() {
+        let area = Rect::new(0, 0, 80, 1);
+        for display in [
+            IslandDisplayConfig::Dots,
+            IslandDisplayConfig::Numbers,
+            IslandDisplayConfig::Labels,
+        ] {
+            for motion in [IslandMotionConfig::Smooth, IslandMotionConfig::Steps] {
+                for sample in 1..100 {
+                    let mut app = animated_app(display, motion, area);
+                    let phase = sample as f32 / 100.0;
+                    let anim = app.island_anim.as_mut().expect("animation state");
+                    anim.outgoing_width.position = lerp(
+                        anim.outgoing_width.position,
+                        anim.outgoing_width.target,
+                        phase,
+                    );
+                    anim.incoming_width.position = lerp(
+                        anim.incoming_width.position,
+                        anim.incoming_width.target,
+                        phase,
+                    );
+                    anim.capsule_total.position = lerp(
+                        anim.capsule_total.position,
+                        anim.capsule_total.target,
+                        phase,
+                    );
+
+                    let animated = layout_animated(&app, area).expect("animated layout");
+                    let anim = app.island_anim.expect("animation state");
+                    let outgoing = animated_participant_rect(
+                        &app,
+                        &animated,
+                        anim.from_tab,
+                        animated.widths.outgoing,
+                    )
+                    .expect("outgoing participant");
+                    let incoming = animated_participant_rect(
+                        &app,
+                        &animated,
+                        anim.to_tab,
+                        animated.widths.incoming,
+                    )
+                    .expect("incoming participant");
+                    let buffer = rendered_buffer(&app, area);
+
+                    for rect in [outgoing, incoming] {
+                        assert!(rect.width >= 2, "{display:?} {motion:?} sample {sample}");
+                        assert_eq!(
+                            buffer[(rect.x, rect.y)].symbol(),
+                            LEFT_CAP,
+                            "{display:?} {motion:?} sample {sample}"
+                        );
+                        assert_eq!(
+                            buffer[(rect.right() - 1, rect.y)].symbol(),
+                            RIGHT_CAP,
+                            "{display:?} {motion:?} sample {sample}"
+                        );
+                    }
+
+                    let mut x = area.x;
+                    let mut accent_runs = 0;
+                    while x < area.right() {
+                        let style = buffer[(x, area.y)].style();
+                        if style.fg != Some(app.palette.accent)
+                            && style.bg != Some(app.palette.accent)
+                        {
+                            x += 1;
+                            continue;
+                        }
+                        let start = x;
+                        while x < area.right() {
+                            let style = buffer[(x, area.y)].style();
+                            if style.fg != Some(app.palette.accent)
+                                && style.bg != Some(app.palette.accent)
+                            {
+                                break;
+                            }
+                            x += 1;
+                        }
+                        assert_eq!(buffer[(start, area.y)].symbol(), LEFT_CAP);
+                        assert_eq!(buffer[(x - 1, area.y)].symbol(), RIGHT_CAP);
+                        accent_runs += 1;
+                    }
+                    if motion == IslandMotionConfig::Steps {
+                        assert_eq!(accent_runs, 1);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn off_motion_is_byte_identical_even_with_stale_animation_state() {
+        let area = Rect::new(0, 0, 40, 1);
+        for display in [
+            IslandDisplayConfig::Dots,
+            IslandDisplayConfig::Numbers,
+            IslandDisplayConfig::Labels,
+        ] {
+            let mut settled = app_with_tabs(2, 1);
+            settled.island.display = display;
+            settled.island.motion = IslandMotionConfig::Off;
+            let animated = animated_app(display, IslandMotionConfig::Off, area);
+
+            assert_eq!(
+                rendered_buffer(&animated, area),
+                rendered_buffer(&settled, area)
+            );
+        }
+    }
+
+    #[test]
+    fn steps_motion_uses_whole_capsules_without_crossfade() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = animated_app(IslandDisplayConfig::Dots, IslandMotionConfig::Steps, area);
+        set_spring_frame(&mut app, 3.4, 2.6, 6.0, -20.0, 20.0);
+        let animated = layout_animated(&app, area).expect("animated layout");
+        let anim = app.island_anim.expect("animation state");
+        let outgoing =
+            animated_participant_rect(&app, &animated, anim.from_tab, animated.widths.outgoing)
+                .expect("outgoing participant");
+        let incoming =
+            animated_participant_rect(&app, &animated, anim.to_tab, animated.widths.incoming)
+                .expect("incoming participant");
+        assert_eq!((outgoing.width, incoming.width), (3, 3));
+
+        let buffer = rendered_buffer(&app, area);
+        for (rect, fill) in [
+            (outgoing, app.palette.accent),
+            (incoming, app.palette.overlay0),
+        ] {
+            assert_eq!(buffer[(rect.x, rect.y)].symbol(), LEFT_CAP);
+            assert_eq!(buffer[(rect.right() - 1, rect.y)].symbol(), RIGHT_CAP);
+            for x in [rect.x, rect.right() - 1] {
+                assert_eq!(buffer[(x, rect.y)].style().fg, Some(fill));
+            }
+        }
+    }
+
+    #[test]
+    fn animation_never_changes_settled_hit_areas() {
+        let area = Rect::new(0, 0, 40, 1);
+        let mut settled = app_with_tabs(2, 1);
+        settled.island.display = IslandDisplayConfig::Labels;
+        let animated = animated_app(
+            IslandDisplayConfig::Labels,
+            IslandMotionConfig::Smooth,
+            area,
+        );
+
+        assert_eq!(
+            compute_tab_bar_view(&animated, area).island_marker_hit_areas,
+            compute_tab_bar_view(&settled, area).island_marker_hit_areas
+        );
     }
 
     #[test]

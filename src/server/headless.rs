@@ -802,15 +802,18 @@ impl HeadlessServer {
             }
 
             // 8. Wait for next event.
-            let next_deadline = self
-                .app
-                .next_headless_loop_deadline_with_git_refresh(
+            let next_deadline = [
+                self.app.next_headless_loop_deadline_with_git_refresh(
                     now,
                     needs_render,
                     self.has_app_client(),
-                )
-                .map(|deadline| deadline.min(now + CLIENT_ACCEPT_POLL_INTERVAL))
-                .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
+                ),
+                self.app.island_animation_tick_deadline(),
+                Some(now + CLIENT_ACCEPT_POLL_INTERVAL),
+            ]
+            .into_iter()
+            .flatten()
+            .min();
             let next_deadline = self
                 .pending_alt_screen_reads
                 .iter()
@@ -1140,6 +1143,18 @@ impl HeadlessServer {
     }
 
     fn sync_foreground_client_state(&mut self) {
+        let previous_effective_size = self.effective_size;
+        self.sync_foreground_client_state_inner();
+        if self.effective_size != previous_effective_size {
+            // Every effective-size change — client resize, promotion, connect,
+            // or removal — invalidates in-flight island geometry (page plans
+            // and label pagination reflow), so snap the animation here at the
+            // single choke point instead of per event.
+            self.app.clear_island_animation();
+        }
+    }
+
+    fn sync_foreground_client_state_inner(&mut self) {
         let Some(client_id) = self.foreground_client_id else {
             self.effective_size = (MIN_COLS, MIN_ROWS);
             self.app.state.outer_terminal_focus = None;
@@ -4383,7 +4398,7 @@ impl HeadlessServer {
     /// Similar to `App::handle_scheduled_tasks` but without resize polling
     /// (the server doesn't have a terminal to resize).
     fn handle_scheduled_tasks_headless(&mut self, now: Instant, geometry_dirty: bool) -> bool {
-        let mut changed = false;
+        let mut changed = self.app.tick_island_animation(now);
 
         // No resize polling needed — server has no terminal.
         // Client resize messages drive size changes instead.
@@ -7321,6 +7336,31 @@ next_tab = ""
             server.app.state.host_terminal_theme,
             server.clients[&1].host_terminal_theme
         );
+    }
+
+    #[test]
+    fn client_resize_cuts_active_island_animation() {
+        let mut server = test_headless_server();
+        server.clients.insert(1, test_app_client(Some(true), 1));
+        server.app.state.island_anim = Some(crate::app::state::IslandAnim {
+            from_tab: 0,
+            to_tab: 1,
+            display: crate::config::IslandDisplayConfig::Dots,
+            page_start: 0,
+            page_len: 2,
+            outgoing_width: crate::app::state::IslandSpring::new(5.0, 1.0),
+            incoming_width: crate::app::state::IslandSpring::new(1.0, 5.0),
+            capsule_total: crate::app::state::IslandSpring::new(6.0, 6.0),
+        });
+
+        assert!(server.handle_server_event(ServerEvent::ClientResize {
+            client_id: 1,
+            cols: 35,
+            rows: 24,
+            cell_width_px: 0,
+            cell_height_px: 0,
+        }));
+        assert!(server.app.state.island_anim.is_none());
     }
 
     #[test]
