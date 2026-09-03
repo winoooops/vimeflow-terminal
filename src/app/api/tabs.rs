@@ -168,6 +168,12 @@ impl App {
             // old geometry lingers until the next refresh (e.g. a tab switch),
             // leaving the visible label stale. Mirrors handle_tab_move.
             self.state.refresh_tab_bar_view();
+            if self.state.island.display == crate::config::IslandDisplayConfig::Labels {
+                // A renamed label changes the animated endpoint geometry while
+                // the in-flight springs still target pre-rename widths; snap
+                // instead of settling against obsolete targets.
+                self.clear_island_animation();
+            }
         }
         self.schedule_session_save();
         self.emit_event(EventEnvelope {
@@ -394,6 +400,85 @@ mod tests {
         let _ = app.handle_pane_move("req".into(), params);
 
         assert!(app.state.island_anim.is_none());
+    }
+
+    #[test]
+    fn api_pane_close_clears_island_animation_when_tab_removed() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let mut workspace = Workspace::test_new("tabs");
+        workspace.test_add_tab(Some("two"));
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.island_anim = Some(island_anim());
+        let pane_id = app.state.workspaces[0].tabs[1].root_pane;
+        let public_pane_id = app.public_pane_id(0, pane_id).unwrap();
+
+        let response = app.handle_pane_close(
+            "req".into(),
+            crate::api::schema::PaneTarget {
+                pane_id: public_pane_id,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert!(app.state.island_anim.is_none());
+    }
+
+    #[test]
+    fn api_tab_rename_clears_island_animation_only_for_labels_display() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let mut workspace = Workspace::test_new("tabs");
+        workspace.test_add_tab(Some("two"));
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let tab_id = app.public_tab_id(0, 1).unwrap();
+
+        app.state.island.display = crate::config::IslandDisplayConfig::Dots;
+        app.state.island_anim = Some(island_anim());
+        let response = app.handle_tab_rename(
+            "req".into(),
+            TabRenameParams {
+                tab_id: tab_id.clone(),
+                label: "renamed".into(),
+            },
+        );
+        serde_json::from_str::<SuccessResponse>(&response).unwrap();
+        assert!(
+            app.state.island_anim.is_some(),
+            "dots display keeps the animation on rename"
+        );
+
+        app.state.island.display = crate::config::IslandDisplayConfig::Labels;
+        let response = app.handle_tab_rename(
+            "req".into(),
+            TabRenameParams {
+                tab_id,
+                label: "renamed-again".into(),
+            },
+        );
+        serde_json::from_str::<SuccessResponse>(&response).unwrap();
+        assert!(
+            app.state.island_anim.is_none(),
+            "labels display snaps the animation on rename"
+        );
     }
 
     #[test]

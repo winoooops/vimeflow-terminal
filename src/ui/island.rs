@@ -615,15 +615,33 @@ fn layout_animated(app: &AppState, area: Rect) -> Option<AnimatedIslandLayout> {
     // width lands exactly on the settled-to capsule, never snapping.
     let fixed_from = f32::from(endpoints.from.capsule.width) - endpoints.settled_from.total();
     let fixed_to = f32::from(endpoints.to.capsule.width) - endpoints.settled_to.total();
-    let fixed_width = lerp(
-        fixed_from,
-        fixed_to,
-        activation(
+    // Dots/numbers moves between an edge and an interior tab conserve the
+    // participant total while the conditional endpoint padding still differs,
+    // so the capsule spring's range can be zero-length and its activation
+    // degenerates to 1.0. Fall back to a participant spring's travel so the
+    // fixed width keeps interpolating instead of jumping a cell.
+    let progress_sources = [
+        (
             anim.capsule_total.position,
             endpoints.settled_from.total(),
             endpoints.settled_to.total(),
         ),
-    );
+        (
+            anim.incoming_width.position,
+            endpoints.settled_from.incoming,
+            endpoints.settled_to.incoming,
+        ),
+        (
+            anim.outgoing_width.position,
+            endpoints.settled_from.outgoing,
+            endpoints.settled_to.outgoing,
+        ),
+    ];
+    let fixed_progress = progress_sources
+        .into_iter()
+        .find(|(_, from, to)| (to - from).abs() > f32::EPSILON)
+        .map_or(1.0, |(position, from, to)| activation(position, from, to));
+    let fixed_width = lerp(fixed_from, fixed_to, fixed_progress);
     let widths = ParticipantWidths::new(anim.outgoing_width.position, anim.incoming_width.position);
     let outgoing_activation = activation(
         widths.outgoing,
@@ -1141,6 +1159,49 @@ mod tests {
         assert_eq!(
             brighten(Color::Rgb(100, 100, 100), 100.0, &host),
             Color::Rgb(108, 108, 108)
+        );
+    }
+
+    #[test]
+    fn conserved_total_moves_still_interpolate_the_fixed_width() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(3, 1);
+        app.island.display = IslandDisplayConfig::Dots;
+        app.island.motion = IslandMotionConfig::Smooth;
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        assert!(app.island_anim.is_some(), "edge-to-interior move animates");
+
+        let endpoints = animation_endpoints(&app, area, 0, 1).expect("endpoints");
+        let settled_from = endpoints.settled_from;
+        let settled_to = endpoints.settled_to;
+        assert!(
+            (settled_from.total() - settled_to.total()).abs() <= f32::EPSILON,
+            "fixture must conserve the participant total (got {} -> {})",
+            settled_from.total(),
+            settled_to.total()
+        );
+        let fixed_from = f32::from(endpoints.from.capsule.width) - settled_from.total();
+        let fixed_to = f32::from(endpoints.to.capsule.width) - settled_to.total();
+        assert!(
+            (fixed_from - fixed_to).abs() > f32::EPSILON,
+            "fixture must exercise differing endpoint padding ({fixed_from} vs {fixed_to})"
+        );
+
+        set_spring_frame(
+            &mut app,
+            (settled_from.outgoing + settled_to.outgoing) / 2.0,
+            (settled_from.incoming + settled_to.incoming) / 2.0,
+            settled_from.total(),
+            0.0,
+            0.0,
+        );
+        let animated = layout_animated(&app, area).expect("animated layout");
+        let expected = (fixed_from + fixed_to) / 2.0;
+        assert!(
+            (animated.fixed_width - expected).abs() <= 0.01,
+            "fixed width must interpolate on participant travel when the capsule \
+             range is degenerate: got {}, want {expected}",
+            animated.fixed_width
         );
     }
 

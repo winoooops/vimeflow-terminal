@@ -174,6 +174,7 @@ the top of the file:
 | `src/app/input/navigate.rs` | Keep indexed and relative Agent focus aligned with the cards-visible order. | `158aabf9` |
 | `src/app/input/mouse.rs` | Focus Agent cards, toggle the focused card from its chevron zone, route island marker clicks and context menus, and keep tab reordering classic-only. | `158aabf9`, dynamic island capsule (this commit) |
 | `src/app/input/sidebar.rs` | Use card-aware body geometry for Agent hit testing and keep classic tab-drag tests on the classic renderer. | `158aabf9`, P5 gate fix (this commit), dynamic island capsule (this commit) |
+| `src/app/input/modal.rs` | Snap the island animation when a TUI rename changes labels-mode geometry. | island motion (this commit) |
 | `src/app/api/layouts.rs` | Clear island animation before applying API-driven layout replacements. | island motion (this commit) |
 | `src/app/api/panes.rs` | Route pane-label API mutations through the shared title ownership and event helper, and clear island animation on API pane moves. | `e006a1ea`, island motion (this commit) |
 | `src/app/api/plugins/mod.rs` | Cover the plugin-tab island-animation clear with a regression test. | island motion (this commit) |

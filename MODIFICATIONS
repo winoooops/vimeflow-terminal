@@ -29,6 +29,7 @@ Modified upstream files
 - src/product_announcements.rs
 - src/app/mod.rs
 - src/app/actions.rs
+- src/app/input/modal.rs
 - src/app/input/mouse.rs
 - src/app/input/navigate.rs
 - src/app/input/sidebar.rs

@@ -1539,17 +1539,19 @@ impl App {
         }
         let workspace_snapshot = self.workspace_info(ws_idx);
         let terminal_id = self.state.terminal_id_for_pane(ws_idx, pane_id);
-        let active_tab_count =
-            (self.state.active == Some(ws_idx)).then(|| self.state.workspaces[ws_idx].tabs.len());
+        let tab_count_before = self.state.workspaces.get(ws_idx).map(|ws| ws.tabs.len());
         let should_close_workspace = {
             let Some(ws) = self.state.workspaces.get_mut(ws_idx) else {
                 return Err(pane_not_found(id, &target.pane_id));
             };
             ws.close_pane(pane_id)
         };
-        if active_tab_count
-            .is_some_and(|tab_count| self.state.workspaces[ws_idx].tabs.len() != tab_count)
+        if self.state.active == Some(ws_idx)
+            && self.state.workspaces.get(ws_idx).map(|ws| ws.tabs.len()) != tab_count_before
         {
+            // Closing a tab's last pane removes the tab; the in-flight island
+            // animation would keep addressing shifted tab indices. Mirrors
+            // handle_pane_died.
             self.clear_island_animation();
         }
         self.state.remove_plugin_pane_records([pane_id]);
