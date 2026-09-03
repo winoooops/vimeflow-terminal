@@ -1539,12 +1539,19 @@ impl App {
         }
         let workspace_snapshot = self.workspace_info(ws_idx);
         let terminal_id = self.state.terminal_id_for_pane(ws_idx, pane_id);
+        let active_tab_count =
+            (self.state.active == Some(ws_idx)).then(|| self.state.workspaces[ws_idx].tabs.len());
         let should_close_workspace = {
             let Some(ws) = self.state.workspaces.get_mut(ws_idx) else {
                 return Err(pane_not_found(id, &target.pane_id));
             };
             ws.close_pane(pane_id)
         };
+        if active_tab_count
+            .is_some_and(|tab_count| self.state.workspaces[ws_idx].tabs.len() != tab_count)
+        {
+            self.clear_island_animation();
+        }
         self.state.remove_plugin_pane_records([pane_id]);
         if should_close_workspace {
             self.state.selected = ws_idx;
@@ -2227,6 +2234,34 @@ mod tests {
         assert_eq!(success.id, "req");
         assert_eq!(app.state.request_remove_linked_worktree, None);
         assert!(app.state.workspaces.is_empty());
+    }
+
+    #[test]
+    fn api_pane_close_clears_island_animation_when_it_removes_a_tab() {
+        let mut app = app_with_linked_worktree();
+        app.state.workspaces[0].test_add_tab(Some("two"));
+        app.state.active = Some(0);
+        app.state.island_anim = Some(crate::app::state::IslandAnim {
+            from_tab: 0,
+            to_tab: 1,
+            outgoing_width: crate::app::state::IslandSpring::new(3.0, 1.0),
+            incoming_width: crate::app::state::IslandSpring::new(3.0, 5.0),
+            capsule_total: crate::app::state::IslandSpring::new(6.0, 6.0),
+        });
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let public_pane_id = app.public_pane_id(0, pane_id).unwrap();
+
+        let response = app.handle_pane_close(
+            "req".into(),
+            PaneTarget {
+                pane_id: public_pane_id,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert!(app.state.island_anim.is_none());
     }
 
     #[test]
