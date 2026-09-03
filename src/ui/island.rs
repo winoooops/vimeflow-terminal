@@ -47,26 +47,28 @@ fn lerp(from: f32, to: f32, progress: f32) -> f32 {
     from + (to - from) * normalized_progress(progress)
 }
 
-/// Host palette slots reported via OSC 4; `None` where the host never answered.
-type HostPalette = [Option<crate::terminal_theme::RgbColor>; 256];
-
 /// Resolve any concrete palette color to RGB channels so the crossfade never
 /// degrades to an end-of-animation pop for named-ANSI or indexed themes.
-/// Named and indexed slots resolve through the host-reported palette first so
-/// motion frames stay on the user's actual theme colors; slots the host never
-/// reported fall back to the stock ghostty palette. `Reset` alone stays
-/// unresolvable (it has no defined channels).
-fn color_channels(color: Color, host_palette: &HostPalette) -> Option<(u8, u8, u8)> {
+/// Named and indexed slots resolve through the host-reported palette (OSC 4)
+/// first so motion frames stay on the user's actual theme colors; slots the
+/// host never reported fall back to the stock ghostty palette. `Reset` (the
+/// "reset"/"default" theme alias) resolves through the host-reported default
+/// foreground (OSC 10) and stays unresolvable only when the host never
+/// answered that query.
+fn color_channels(
+    color: Color,
+    host_theme: &crate::terminal_theme::TerminalTheme,
+) -> Option<(u8, u8, u8)> {
     let indexed = |idx: u8| {
         Some(
-            host_palette[usize::from(idx)]
+            host_theme.palette[usize::from(idx)]
                 .map(|rgb| (rgb.r, rgb.g, rgb.b))
                 .unwrap_or_else(|| stock_palette_channels(idx)),
         )
     };
     match color {
         Color::Rgb(r, g, b) => Some((r, g, b)),
-        Color::Reset => None,
+        Color::Reset => host_theme.foreground.map(|rgb| (rgb.r, rgb.g, rgb.b)),
         Color::Indexed(n) => indexed(n),
         Color::Black => indexed(0),
         Color::Red => indexed(1),
@@ -93,8 +95,11 @@ fn stock_palette_channels(idx: u8) -> (u8, u8, u8) {
     (rgb.r, rgb.g, rgb.b)
 }
 
-fn rgb_to_hsl(color: Color, host_palette: &HostPalette) -> Option<(f32, f32, f32)> {
-    let (r, g, b) = color_channels(color, host_palette)?;
+fn rgb_to_hsl(
+    color: Color,
+    host_theme: &crate::terminal_theme::TerminalTheme,
+) -> Option<(f32, f32, f32)> {
+    let (r, g, b) = color_channels(color, host_theme)?;
     let [r, g, b] = [r, g, b].map(|channel| f32::from(channel) / 255.0);
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
@@ -130,7 +135,12 @@ fn hsl_to_rgb(hue: f32, saturation: f32, lightness: f32) -> Color {
     Color::Rgb(channel(r), channel(g), channel(b))
 }
 
-fn lerp_hsl(from: Color, to: Color, progress: f32, host_palette: &HostPalette) -> Color {
+fn lerp_hsl(
+    from: Color,
+    to: Color,
+    progress: f32,
+    host_theme: &crate::terminal_theme::TerminalTheme,
+) -> Color {
     let progress = normalized_progress(progress);
     if progress <= 0.0 {
         return from;
@@ -139,7 +149,7 @@ fn lerp_hsl(from: Color, to: Color, progress: f32, host_palette: &HostPalette) -
         return to;
     }
     let (Some((from_h, from_s, from_l)), Some((to_h, to_s, to_l))) =
-        (rgb_to_hsl(from, host_palette), rgb_to_hsl(to, host_palette))
+        (rgb_to_hsl(from, host_theme), rgb_to_hsl(to, host_theme))
     else {
         return from;
     };
@@ -151,12 +161,16 @@ fn lerp_hsl(from: Color, to: Color, progress: f32, host_palette: &HostPalette) -
     )
 }
 
-fn brighten(color: Color, velocity: f32, host_palette: &HostPalette) -> Color {
+fn brighten(
+    color: Color,
+    velocity: f32,
+    host_theme: &crate::terminal_theme::TerminalTheme,
+) -> Color {
     let amount = (velocity.abs() * VELOCITY_BRIGHTNESS_SCALE).min(MAX_VELOCITY_BRIGHTNESS);
     if amount <= f32::EPSILON {
         return color;
     }
-    let Some((hue, saturation, lightness)) = rgb_to_hsl(color, host_palette) else {
+    let Some((hue, saturation, lightness)) = rgb_to_hsl(color, host_theme) else {
         return color;
     };
     hsl_to_rgb(hue, saturation, (lightness + amount).min(1.0))
@@ -977,7 +991,7 @@ fn render_animated_layout(
     };
     let outgoing_tone = positional_fg(app, anim.from_tab, anim.to_tab);
     let incoming_tone = positional_fg(app, anim.to_tab, anim.from_tab);
-    let host_palette = &app.host_terminal_theme.palette;
+    let host_theme = &app.host_terminal_theme;
     let (outgoing_fill, incoming_fill) = if crossfade {
         (
             brighten(
@@ -985,20 +999,20 @@ fn render_animated_layout(
                     outgoing_tone,
                     p.accent,
                     animated.outgoing_activation,
-                    host_palette,
+                    host_theme,
                 ),
                 animated.outgoing_velocity,
-                host_palette,
+                host_theme,
             ),
             brighten(
                 lerp_hsl(
                     incoming_tone,
                     p.accent,
                     animated.incoming_activation,
-                    host_palette,
+                    host_theme,
                 ),
                 animated.incoming_velocity,
-                host_palette,
+                host_theme,
             ),
         )
     } else if animated_content_visible(animated.incoming_activation) {
@@ -1150,7 +1164,7 @@ mod tests {
     fn hsl_lerp_preserves_endpoints_and_crosses_the_short_hue_arc() {
         let from = Color::Rgb(255, 0, 0);
         let to = Color::Rgb(0, 255, 0);
-        let host = [None; 256];
+        let host = crate::terminal_theme::TerminalTheme::default();
 
         assert_eq!(lerp_hsl(from, to, 0.0, &host), from);
         assert_eq!(lerp_hsl(from, to, 0.5, &host), Color::Rgb(255, 255, 0));
@@ -1212,8 +1226,15 @@ mod tests {
             g: 100,
             b: 50,
         };
-        let mut host = [None; 256];
-        host[1] = Some(host_red);
+        let host_fg = crate::terminal_theme::RgbColor {
+            r: 200,
+            g: 200,
+            b: 190,
+        };
+        let mut host = crate::terminal_theme::TerminalTheme::default();
+        host.palette[1] = Some(host_red);
+        host.foreground = Some(host_fg);
+        let unreported = crate::terminal_theme::TerminalTheme::default();
 
         assert_eq!(
             color_channels(Color::Red, &host),
@@ -1226,9 +1247,19 @@ mod tests {
             "named ANSI and its index must resolve identically"
         );
         assert_eq!(
-            color_channels(Color::Red, &[None; 256]),
+            color_channels(Color::Red, &unreported),
             Some(stock_palette_channels(1)),
             "unreported slots fall back to the stock ghostty palette"
+        );
+        assert_eq!(
+            color_channels(Color::Reset, &host),
+            Some((host_fg.r, host_fg.g, host_fg.b)),
+            "the reset alias resolves through the host default foreground"
+        );
+        assert_eq!(
+            color_channels(Color::Reset, &unreported),
+            None,
+            "reset stays unresolvable when the host never reported a foreground"
         );
         // Endpoint continuity: the first blend step away from the settled frame
         // must depart from the host's actual color, not a stock approximation.
@@ -1324,26 +1355,26 @@ mod tests {
             assert_eq!((outgoing.width, incoming.width), expected_widths);
 
             let buffer = rendered_buffer(&app, area);
-            let host_palette = &app.host_terminal_theme.palette;
+            let host_theme = &app.host_terminal_theme;
             let outgoing_fill = brighten(
                 lerp_hsl(
                     positional_fg(&app, anim.from_tab, anim.to_tab),
                     app.palette.accent,
                     animated.outgoing_activation,
-                    host_palette,
+                    host_theme,
                 ),
                 animated.outgoing_velocity,
-                host_palette,
+                host_theme,
             );
             let incoming_fill = brighten(
                 lerp_hsl(
                     positional_fg(&app, anim.to_tab, anim.from_tab),
                     app.palette.accent,
                     animated.incoming_activation,
-                    host_palette,
+                    host_theme,
                 ),
                 animated.incoming_velocity,
-                host_palette,
+                host_theme,
             );
             for (rect, fill) in [(outgoing, outgoing_fill), (incoming, incoming_fill)] {
                 assert_eq!(buffer[(rect.x, rect.y)].symbol(), LEFT_CAP, "{display:?}");
