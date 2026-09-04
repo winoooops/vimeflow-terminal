@@ -407,7 +407,7 @@ fn marker_text_for_active(
             .tabs
             .get(tab_idx)
             .and_then(|tab| tab.custom_name.as_deref())
-            .filter(|title| !title.is_empty())
+            .filter(|title| display_width(title) > 0)
         else {
             return untitled;
         };
@@ -444,7 +444,7 @@ fn marker_text_for_active(
         IslandDisplayConfig::Labels => {
             let name = ws
                 .tab_display_name(tab_idx)
-                .filter(|name| !name.is_empty())
+                .filter(|name| display_width(name) > 0)
                 .unwrap_or_else(|| (tab_idx + 1).to_string());
             if !active {
                 let label = truncate_end(&name, LABEL_MAX_WIDTH - 2);
@@ -2946,6 +2946,26 @@ mod tests {
         assert_eq!(
             active_title_marker_text(ws, 1, IslandDisplayConfig::Dots, true),
             "   "
+        );
+        assert_eq!(
+            active_title_marker_text(ws, 1, IslandDisplayConfig::Numbers, true),
+            " 2 "
+        );
+
+        // Zero-width unicode names (byte-nonempty, rendered width 0) must take
+        // the same fallbacks — the guard is display width, not byte emptiness.
+        app.workspaces[0].tabs[1].set_custom_name("\u{200b}\u{200b}".to_string());
+        let ws = &app.workspaces[0];
+        assert_eq!(
+            marker_text_for_active(
+                ws,
+                1,
+                0,
+                IslandDisplayConfig::Labels,
+                IslandCapsConfig::Square,
+                0
+            ),
+            "2"
         );
         assert_eq!(
             active_title_marker_text(ws, 1, IslandDisplayConfig::Numbers, true),
