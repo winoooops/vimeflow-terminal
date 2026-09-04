@@ -219,8 +219,13 @@ a registered fork-modified file. Nothing else about layout changes.
     fallback remains** as the explicit exception: when the labeled
     endpoints cannot share a page (settled layout or motion endpoints),
     the existing labels-to-dots degradation applies rather than the bar
-    vanishing. Motion, endpoints, and hit areas otherwise need no model
-    change: marker widths already flow from measured layout text.
+    vanishing. The fallback renders **fully as dots** — dot styling, dot
+    stadium predicates, and `active_title` ignored (maximum compaction is
+    the fallback's purpose) — so the effective display travels with the
+    layout into the settled renderer, exactly as `endpoints.display`
+    already does for motion. Motion, endpoints, and hit areas otherwise
+    need no model change: marker widths already flow from measured layout
+    text.
   - Capsule padding under round caps is **per-side conditional**
     (amended 2026-09-01 after the flush look): **0** on a side whose
     adjacent element is the active pill's cap — curves nest — and **1**
