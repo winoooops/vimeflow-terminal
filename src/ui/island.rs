@@ -384,6 +384,15 @@ fn active_title_marker_text(
     )
 }
 
+/// Strip control characters (newlines, tabs, CR, …) from a tab name and
+/// reject anything with no rendered width, so hostile API labels can never
+/// produce an invisible or line-broken marker — the caller falls back to the
+/// index/untitled form on None. Guards the class, not individual characters.
+fn sanitized_label(name: &str) -> Option<String> {
+    let cleaned: String = name.chars().filter(|c| !c.is_control()).collect();
+    (display_width(&cleaned) > 0).then_some(cleaned)
+}
+
 fn marker_text_for_active(
     ws: &crate::workspace::Workspace,
     tab_idx: usize,
@@ -407,10 +416,11 @@ fn marker_text_for_active(
             .tabs
             .get(tab_idx)
             .and_then(|tab| tab.custom_name.as_deref())
-            .filter(|title| display_width(title) > 0)
+            .and_then(sanitized_label)
         else {
             return untitled;
         };
+        let title = title.as_str();
         let fixed_width = mark.map_or(0, |mark| display_width(mark) + 1) + 2;
         let untitled_width = display_width(&untitled);
         if fixed_width >= active_title_budget || untitled_width > active_title_budget {
@@ -444,7 +454,8 @@ fn marker_text_for_active(
         IslandDisplayConfig::Labels => {
             let name = ws
                 .tab_display_name(tab_idx)
-                .filter(|name| display_width(name) > 0)
+                .as_deref()
+                .and_then(sanitized_label)
                 .unwrap_or_else(|| (tab_idx + 1).to_string());
             if !active {
                 let label = truncate_end(&name, LABEL_MAX_WIDTH - 2);
@@ -2970,6 +2981,35 @@ mod tests {
         assert_eq!(
             active_title_marker_text(ws, 1, IslandDisplayConfig::Numbers, true),
             " 2 "
+        );
+
+        // Control characters strip rather than line-break the one-row marker;
+        // a name that is all control characters falls back like empty.
+        app.workspaces[0].tabs[1].set_custom_name("\na\nb".to_string());
+        let ws = &app.workspaces[0];
+        assert_eq!(
+            marker_text_for_active(
+                ws,
+                1,
+                0,
+                IslandDisplayConfig::Labels,
+                IslandCapsConfig::Square,
+                0
+            ),
+            "ab"
+        );
+        app.workspaces[0].tabs[1].set_custom_name("\n\r\t".to_string());
+        let ws = &app.workspaces[0];
+        assert_eq!(
+            marker_text_for_active(
+                ws,
+                1,
+                0,
+                IslandDisplayConfig::Labels,
+                IslandCapsConfig::Square,
+                0
+            ),
+            "2"
         );
     }
 
