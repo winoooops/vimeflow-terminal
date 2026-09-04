@@ -407,6 +407,7 @@ fn marker_text_for_active(
             .tabs
             .get(tab_idx)
             .and_then(|tab| tab.custom_name.as_deref())
+            .filter(|title| !title.is_empty())
         else {
             return untitled;
         };
@@ -416,9 +417,6 @@ fn marker_text_for_active(
             return untitled;
         }
         let title = truncate_end(title, active_title_budget - fixed_width);
-        if title.is_empty() {
-            return untitled;
-        }
         let padding = untitled_width.saturating_sub(fixed_width + display_width(&title));
         match mark {
             Some(mark) => format!(" {mark} {title}{} ", " ".repeat(padding)),
@@ -446,6 +444,7 @@ fn marker_text_for_active(
         IslandDisplayConfig::Labels => {
             let name = ws
                 .tab_display_name(tab_idx)
+                .filter(|name| !name.is_empty())
                 .unwrap_or_else(|| (tab_idx + 1).to_string());
             if !active {
                 let label = truncate_end(&name, LABEL_MAX_WIDTH - 2);
@@ -2921,6 +2920,35 @@ mod tests {
         );
         assert_eq!(
             active_title_marker_text(ws, 1, IslandDisplayConfig::Numbers, false),
+            " 2 "
+        );
+    }
+
+    #[test]
+    fn empty_names_use_index_labels_and_untitled_compact_markers() {
+        let mut app = app_with_tabs(2, 1);
+        app.workspaces[0].tabs[1].set_custom_name(String::new());
+        let ws = &app.workspaces[0];
+
+        for (caps, inactive) in [
+            (IslandCapsConfig::Round, format!("{LEFT_CAP}2{RIGHT_CAP}")),
+            (IslandCapsConfig::Square, "2".to_string()),
+        ] {
+            assert_eq!(
+                marker_text_for_active(ws, 1, 0, IslandDisplayConfig::Labels, caps, 0),
+                inactive
+            );
+            assert_eq!(
+                marker_text_for_active(ws, 1, 1, IslandDisplayConfig::Labels, caps, 0),
+                " 2 "
+            );
+        }
+        assert_eq!(
+            active_title_marker_text(ws, 1, IslandDisplayConfig::Dots, true),
+            "   "
+        );
+        assert_eq!(
+            active_title_marker_text(ws, 1, IslandDisplayConfig::Numbers, true),
             " 2 "
         );
     }
