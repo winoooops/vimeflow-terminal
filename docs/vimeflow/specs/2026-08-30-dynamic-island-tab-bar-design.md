@@ -195,7 +195,12 @@ a registered fork-modified file. Nothing else about layout changes.
   - `labels` (amended 2026-09-03, operator decision): **every tab shows
     its name** — the full labeled bar. Inactive = the tab's display name
     (custom name, else the index as upstream's default text), truncated
-    to fit `LABEL_MAX_WIDTH`, in the positional tone; under round caps it
+    to the **same `LABEL_MAX_WIDTH − 2` text budget as the active pill**
+    (second amendment 2026-09-04: the earlier full-16 inactive budget let
+    the inactive form show more of the name than the active — inverted
+    hierarchy; with one shared text budget the active pill is always the
+    wider form, by exactly its padding), in the positional tone; under
+    round caps it
     wears the same mini-stadium as numbers-inactive (cap + name + cap on
     the muted token bg), under square caps bare text. Active = ` name `
     (one-space padding) on accent bg, total width `clamp(3, 16)` cells
@@ -284,12 +289,17 @@ flips, and workspace switches always cut — never slide.
   geometry) — no restart, no jank;
   settle = all springs within epsilon of target with negligible velocity.
   The outgoing pill shrinks toward its resting marker while the incoming
-  marker grows to the pill **in the same frames**. Width conservation is
-  mode-dependent: in `dots` and `numbers` the settled marker widths are
-  fixed, so the swap conserves total capsule width; in `labels` the two
-  settled totals differ, so the **capsule width itself tweens** between
-  them on the same curve (the island breathes — closer to the reference,
-  not a defect). **Shapes never break** (amended 2026-09-02 after the
+  marker grows to the pill **in the same frames**. (Superseded 2026-09-03
+  by the stable capsule: the capsule-width tween is **retired** — the
+  rendered capsule holds the page's reserved width for the whole
+  transition in every display; participant totals still differ between
+  endpoints, but that difference now redistributes as interior slack
+  instead of moving the outer edges. `capsule_total` **remains as an
+  invisible lifecycle spring**: it still tracks the participant-total
+  travel, still participates in `is_settled` and the `at_from`/`at_to`
+  seam checks, and still serves as the first progress source for the
+  fixed-width interpolation — it just no longer paints the capsule
+  rect.) **Shapes never break** (amended 2026-09-02 after the
   first motion look: flat mid-frames read as sharp-corner→pill popping):
   interpolated widths quantize to whole cells and **both participants
   carry their semicircle caps on every frame** — sub-cell eighth-block
@@ -297,6 +307,12 @@ flips, and workspace switches always cut — never slide.
   a seam. Perceived smoothness comes from the color crossfade (both
   participants' colors lerp between accent and their positional tone —
   truecolor only, wire always emits RGB) riding the ease-out width steps.
+  Above the gate, content **clips progressively to the pill's current
+  interior** (`truncate_end` to the available cells, left-anchored inside
+  the padding) instead of waiting for the full text to fit — a long
+  title reveals with the growing pill rather than popping in at the end,
+  which reads identical to the old behavior for short titles (amended
+  2026-09-03 after the live look at a 16-cell label).
   Incoming digit/label content appears only above ~60% progress so text
   is never squashed; mini-stadiums morph like the pill.
 - **steps**: the same spring-driven, whole-cell, always-capped morph
@@ -356,22 +372,49 @@ untouched.
   whose index-string fallback would render the explicitly rejected
   degenerate `2 2` in numbers. `None` renders exactly today's untitled
   form (`␣␣␣` solid run / `␣N␣`); the mark already identifies the tab.
-- **Width budget**: the whole active pill (mark, spaces, title, padding,
-  before caps) clamps to the existing `LABEL_MAX_WIDTH = 16` via
-  `truncate_end`, minimum the current untitled width. `marker_budget`
-  currently budgets the dots active at 3 and numbers at `digits + 2`;
-  with `active_title` on, **both modes budget the active at
-  `LABEL_MAX_WIDTH`** (the labels rule) so the stable-input page math
-  never admits more markers than the titled pill leaves room for — the
-  cost is labels-equivalent pagination, never an island that overflows or
-  vanishes. On rows too narrow for any title, truncation walks the title
+- **Width budget** (amended 2026-09-03, operator decision after the
+  capsule-width comparison): the whole active pill (mark, spaces, title,
+  padding, before caps) clamps to `ACTIVE_TITLE_MAX_WIDTH = 10` via
+  `truncate_end`, minimum the current untitled width — deliberately
+  tighter than labels' 16 so the capsule's switch-to-switch width change
+  (which equals the difference between the outgoing and incoming pill
+  widths) stays within ~4 cells instead of ballooning by 10 on a
+  long-titled tab. Labels display keeps `LABEL_MAX_WIDTH = 16` — it is
+  structurally near-immune since both states carry the name.
+  `marker_budget` budgets the titled dots/numbers active at
+  `ACTIVE_TITLE_MAX_WIDTH` so the stable-input page math never admits
+  more markers than the titled pill leaves room for.
+- **Stable capsule per page** (second amendment 2026-09-03, after the
+  clamp alone still read as breathing): the rendered capsule width is
+  **constant while the page and tab set hold** — computed as the maximum,
+  over the page's tabs, of the **complete candidate capsule width** with
+  that tab active: markers, gaps, page indicator, active-pill caps, outer
+  capsule caps, and the conditional per-side padding all included (only
+  the complete width guarantees fixed outer edges); the
+  actual content lays out as today and **centers inside the reserved
+  frame**, in both `center` and `left` positions. A tab switch therefore
+  never moves the outer edges: only the pill, markers, and slack
+  redistribute inside. Applies to **all three displays** (one uniform
+  rule; labels' residual 0–2-cell breathing disappears too). With
+  clamp 10 the permanent reserve stays within ~2 cells of a short-active
+  layout. The reserve stays **purely derived** — computed inside the
+  layout pass from current state on every call, no cached field, no
+  invalidation wiring; "recomputes on page change, tab
+  create/close/reorder, rename, resize, and config flips" describes the
+  only inputs that can change its **value**, all paths that already snap
+  rather than animate. Motion consequence: the
+  animated overlay renders the capsule at the reserved width for the
+  whole transition (its width no longer tweens); the springs keep
+  driving participant widths, positions, and the crossfade inside the
+  fixed frame. On rows too narrow for any title, truncation walks the title
   down and the pill bottoms out at its untitled form rather than forcing
   a different page plan.
 - **Motion interplay**: endpoints derive from layouts, so the incoming
   pill's spring targets the titled width and the outgoing shrinks from
   it. This **retires the dots/numbers width-conservation property**: with
-  per-tab title widths the settled totals differ between endpoints, so
-  titled dots/numbers breathe through the capsule tween exactly like
+  per-tab title widths the settled totals differ between endpoints — but
+  under the stable capsule that difference stays interior (slack
+  redistribution), never a capsule tween — exactly like
   labels (the Motion section's conserved-total fallback chain already
   handles the equal-width special case). Mid-flight content keeps the
   existing >60%-activation gate (`animated_content_visible`);

@@ -3443,6 +3443,7 @@ mod tests {
 
     fn island_motion_state() -> AppState {
         let mut state = app_with_workspaces(&["island"]);
+        state.island.active_title = false;
         for idx in 1..11 {
             state.workspaces[0].test_add_tab(Some(&format!("tab-{idx}")));
         }
@@ -4429,6 +4430,32 @@ mod tests {
         assert_eq!(
             (anim.incoming_width.position, anim.incoming_width.target),
             (1.0, 5.0)
+        );
+    }
+
+    #[test]
+    fn titled_island_motion_tweens_different_widths() {
+        let mut state = app_with_workspaces(&["island"]);
+        state.workspaces[0].tabs[0].set_custom_name("a".into());
+        state.workspaces[0].test_add_tab(Some("longer"));
+        state.island.active_title = true;
+        state.view.tab_bar_rect = Rect::new(0, 0, 80, 1);
+        state.refresh_tab_bar_view();
+
+        assert!(state.switch_workspace_tab(0, 1));
+
+        let anim = state.island_anim.expect("titled animation");
+        assert_eq!(
+            (anim.outgoing_width.position, anim.outgoing_width.target),
+            (7.0, 1.0)
+        );
+        assert_eq!(
+            (anim.incoming_width.position, anim.incoming_width.target),
+            (1.0, 12.0)
+        );
+        assert_eq!(
+            (anim.capsule_total.position, anim.capsule_total.target),
+            (8.0, 13.0)
         );
     }
 

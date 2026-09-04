@@ -576,6 +576,7 @@ mod tests {
     #[test]
     fn island_view_exposes_marker_hit_areas_without_new_tab() {
         let mut app = AppState::test_new();
+        app.island.active_title = false;
         let mut ws = Workspace::test_new("test");
         for _ in 1..4 {
             ws.test_add_tab(None);
@@ -589,10 +590,10 @@ mod tests {
         assert_eq!(
             view.island_marker_hit_areas,
             vec![
-                Rect::new(20, 2, 3, 1),
-                Rect::new(25, 2, 1, 1),
-                Rect::new(27, 2, 1, 1),
-                Rect::new(29, 2, 1, 1),
+                Rect::new(19, 2, 3, 1),
+                Rect::new(24, 2, 1, 1),
+                Rect::new(26, 2, 1, 1),
+                Rect::new(28, 2, 1, 1),
             ]
         );
         assert_eq!(view.new_tab_hit_area, Rect::default());
