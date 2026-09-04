@@ -233,6 +233,7 @@ struct MarkerLayout {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IslandLayout {
+    display: IslandDisplayConfig,
     capsule: Rect,
     indicator: Option<(Rect, String)>,
     markers: Vec<MarkerLayout>,
@@ -280,16 +281,8 @@ fn capsule_padding(caps: IslandCapsConfig, adjacent_marker_cap: bool) -> usize {
     }
 }
 
-fn marker_budget(
-    display: IslandDisplayConfig,
-    tab_count: usize,
-    caps: IslandCapsConfig,
-    active_title: bool,
-) -> usize {
+fn marker_budget(display: IslandDisplayConfig, tab_count: usize, caps: IslandCapsConfig) -> usize {
     let active_width = (match display {
-        IslandDisplayConfig::Dots | IslandDisplayConfig::Numbers if active_title => {
-            ACTIVE_TITLE_MAX_WIDTH
-        }
         IslandDisplayConfig::Dots => 3,
         IslandDisplayConfig::Numbers => digits(tab_count) + 2,
         IslandDisplayConfig::Labels => LABEL_MAX_WIDTH,
@@ -315,9 +308,8 @@ fn page_plan(
     area_width: usize,
     display: IslandDisplayConfig,
     caps: IslandCapsConfig,
-    active_title: bool,
 ) -> PagePlan {
-    let marker_width = marker_budget(display, tab_count, caps, active_title);
+    let marker_width = marker_budget(display, tab_count, caps);
     let fixed_width = 2 * CAPSULE_PADDING_BUDGET + caps_width(caps);
     if tab_count <= MAX_PAGE_SIZE
         && fixed_width.saturating_add(markers_width(tab_count, marker_width)) <= area_width
@@ -358,7 +350,7 @@ fn marker_text(
     display: IslandDisplayConfig,
     caps: IslandCapsConfig,
 ) -> String {
-    marker_text_for_active(ws, tab_idx, ws.active_tab, display, caps, false)
+    marker_text_for_active(ws, tab_idx, ws.active_tab, display, caps, None)
 }
 
 #[cfg(test)]
@@ -374,7 +366,7 @@ fn active_title_marker_text(
         ws.active_tab,
         display,
         IslandCapsConfig::Round,
-        active_title,
+        active_title.then_some(ACTIVE_TITLE_MAX_WIDTH),
     )
 }
 
@@ -384,7 +376,7 @@ fn marker_text_for_active(
     active_tab: usize,
     display: IslandDisplayConfig,
     caps: IslandCapsConfig,
-    active_title: bool,
+    active_title_width: Option<usize>,
 ) -> String {
     let active = tab_idx == active_tab;
     if !active && caps == IslandCapsConfig::Round && display == IslandDisplayConfig::Dots {
@@ -394,9 +386,9 @@ fn marker_text_for_active(
     // index is only the default text an unnamed tab falls back to — while
     // the dots circle stays as the mode's shape mark beside the title.
     let titled = |mark: Option<&str>, untitled: String| {
-        if !active_title {
+        let Some(max_width) = active_title_width else {
             return untitled;
-        }
+        };
         let Some(title) = ws
             .tabs
             .get(tab_idx)
@@ -405,10 +397,10 @@ fn marker_text_for_active(
             return untitled;
         };
         let fixed_width = mark.map_or(0, |mark| display_width(mark) + 1) + 2;
-        if fixed_width > ACTIVE_TITLE_MAX_WIDTH {
+        if fixed_width >= max_width {
             return untitled;
         }
-        let title = truncate_end(title, ACTIVE_TITLE_MAX_WIDTH - fixed_width);
+        let title = truncate_end(title, max_width - fixed_width);
         match mark {
             Some(mark) => format!(" {mark} {title} "),
             None => format!(" {title} "),
@@ -452,6 +444,15 @@ fn marker_text_for_active(
     }
 }
 
+fn active_title_enabled(app: &AppState, display: IslandDisplayConfig) -> bool {
+    app.island.active_title
+        && app.island.display != IslandDisplayConfig::Labels
+        && matches!(
+            display,
+            IslandDisplayConfig::Dots | IslandDisplayConfig::Numbers
+        )
+}
+
 fn layout_for_display(
     app: &AppState,
     area: Rect,
@@ -484,10 +485,9 @@ fn layout_for_display_active(
         usize::from(area.width),
         display,
         app.island.caps,
-        app.island.active_title,
     );
     let page_end = (page.start + page.page_size).min(ws.tabs.len());
-    let candidate_layout = |candidate_active| {
+    let candidate_layout = |candidate_active, active_title_width| {
         let marker_texts = (page.start..page_end)
             .map(|tab_idx| {
                 (
@@ -498,7 +498,7 @@ fn layout_for_display_active(
                         candidate_active,
                         display,
                         app.island.caps,
-                        app.island.active_title,
+                        active_title_width,
                     ),
                 )
             })
@@ -537,14 +537,35 @@ fn layout_for_display_active(
             + marker_width;
         (marker_texts, left_padding, right_padding, capsule_width)
     };
-    let (marker_texts, left_padding, _right_padding, content_width) = candidate_layout(active_tab);
-    let capsule_width = (page.start..page_end)
-        .filter(|candidate_active| *candidate_active != active_tab)
-        .map(|candidate_active| candidate_layout(candidate_active).3)
-        .fold(content_width, usize::max);
-    if capsule_width > usize::from(area.width) {
-        return None;
-    }
+    let minimum_title_width = match display {
+        IslandDisplayConfig::Dots => display_width(ROUND_DOT) + 4,
+        IslandDisplayConfig::Numbers => 3,
+        IslandDisplayConfig::Labels => ACTIVE_TITLE_MAX_WIDTH,
+    };
+    let mut active_title_width =
+        active_title_enabled(app, display).then_some(ACTIVE_TITLE_MAX_WIDTH);
+    let (marker_texts, left_padding, _right_padding, content_width, capsule_width) = loop {
+        let (marker_texts, left_padding, right_padding, content_width) =
+            candidate_layout(active_tab, active_title_width);
+        let capsule_width = (page.start..page_end)
+            .filter(|candidate_active| *candidate_active != active_tab)
+            .map(|candidate_active| candidate_layout(candidate_active, active_title_width).3)
+            .fold(content_width, usize::max);
+        if capsule_width <= usize::from(area.width) {
+            break (
+                marker_texts,
+                left_padding,
+                right_padding,
+                content_width,
+                capsule_width,
+            );
+        }
+        active_title_width = match active_title_width {
+            Some(width) if width > minimum_title_width => Some(width - 1),
+            Some(_) => None,
+            None => return None,
+        };
+    };
 
     let content_offset = (capsule_width - content_width) / 2;
     let capsule_width = capsule_width as u16;
@@ -585,6 +606,7 @@ fn layout_for_display_active(
     }
 
     Some(IslandLayout {
+        display,
         capsule,
         indicator,
         markers,
@@ -653,11 +675,7 @@ fn animation_endpoints(
         marker_visual_width(&to, from_tab, to_tab, app.island.caps)?,
         marker_visual_width(&to, to_tab, to_tab, app.island.caps)?,
     );
-    let renders_titles = app.island.active_title
-        && matches!(
-            display,
-            IslandDisplayConfig::Dots | IslandDisplayConfig::Numbers
-        )
+    let renders_titles = active_title_enabled(app, display)
         && app
             .active
             .and_then(|idx| app.workspaces.get(idx))
@@ -876,7 +894,6 @@ fn render_settled_layout(
     frame: &mut Frame,
     layout: &IslandLayout,
     active_tab: usize,
-    display: IslandDisplayConfig,
 ) {
     let p = &app.palette;
     let round_caps = app.island.caps == IslandCapsConfig::Round;
@@ -916,7 +933,7 @@ fn render_settled_layout(
         let inactive_number_stadium = !active
             && round_caps
             && matches!(
-                display,
+                layout.display,
                 IslandDisplayConfig::Numbers | IslandDisplayConfig::Labels
             );
         let style = if active {
@@ -1039,7 +1056,7 @@ fn render_animated_content(
         return;
     };
     if display == IslandDisplayConfig::Dots
-        && (!app.island.active_title
+        && (!active_title_enabled(app, display)
             || ws
                 .tabs
                 .get(tab_idx)
@@ -1053,7 +1070,7 @@ fn render_animated_content(
         tab_idx,
         display,
         app.island.caps,
-        app.island.active_title,
+        active_title_enabled(app, display).then_some(ACTIVE_TITLE_MAX_WIDTH),
     );
     let text_width = display_width_u16(&text);
     let cap_width = u16::from(app.island.caps == IslandCapsConfig::Round);
@@ -1293,9 +1310,9 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
             return;
         };
         if animated.at_from {
-            render_settled_layout(app, frame, &animated.from, anim.from_tab, animated.display);
+            render_settled_layout(app, frame, &animated.from, anim.from_tab);
         } else if animated.at_to {
-            render_settled_layout(app, frame, &animated.to, anim.to_tab, animated.display);
+            render_settled_layout(app, frame, &animated.to, anim.to_tab);
         } else {
             render_animated_layout(app, frame, area, &animated);
         }
@@ -1312,7 +1329,7 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
     else {
         return;
     };
-    render_settled_layout(app, frame, &layout, active_tab, app.island.display);
+    render_settled_layout(app, frame, &layout, active_tab);
 }
 
 #[cfg(test)]
@@ -1869,7 +1886,7 @@ mod tests {
             1,
             IslandDisplayConfig::Numbers,
             app.island.caps,
-            app.island.active_title,
+            app.island.active_title.then_some(ACTIVE_TITLE_MAX_WIDTH),
         );
         assert_eq!(display_width(&full_text), ACTIVE_TITLE_MAX_WIDTH);
 
@@ -1945,7 +1962,7 @@ mod tests {
                 long_tab,
                 IslandDisplayConfig::Numbers,
                 app.island.caps,
-                app.island.active_title,
+                app.island.active_title.then_some(ACTIVE_TITLE_MAX_WIDTH),
             );
             let interior = Rect::new(rect.x + 1, rect.y, rect.width - 2, 1);
             let buffer = rendered_buffer(&app, area);
@@ -2638,7 +2655,6 @@ mod tests {
             60,
             IslandDisplayConfig::Dots,
             IslandCapsConfig::Round,
-            false,
         );
         let same_page = page_plan(
             11,
@@ -2646,7 +2662,6 @@ mod tests {
             60,
             IslandDisplayConfig::Dots,
             IslandCapsConfig::Round,
-            false,
         );
         assert_eq!(first.page_size, 8);
         assert_eq!(first.start, 0);
@@ -2659,7 +2674,6 @@ mod tests {
             60,
             IslandDisplayConfig::Dots,
             IslandCapsConfig::Round,
-            false,
         );
         assert_eq!(next.start, 8);
         assert_eq!(next.total_pages, 2);
@@ -2690,7 +2704,7 @@ mod tests {
         assert_eq!(capsule_padding(IslandCapsConfig::Round, false), 1);
         assert_eq!(capsule_padding(IslandCapsConfig::Square, true), 1);
         assert_eq!(capsule_padding(IslandCapsConfig::Square, false), 1);
-        let untitled_budget = |display, caps| marker_budget(display, 11, caps, false);
+        let untitled_budget = |display, caps| marker_budget(display, 11, caps);
         assert_eq!(
             untitled_budget(IslandDisplayConfig::Dots, IslandCapsConfig::Round),
             5
@@ -2715,16 +2729,6 @@ mod tests {
             untitled_budget(IslandDisplayConfig::Dots, IslandCapsConfig::Square),
             3
         );
-        for display in [IslandDisplayConfig::Dots, IslandDisplayConfig::Numbers] {
-            assert_eq!(
-                marker_budget(display, 11, IslandCapsConfig::Round, true),
-                ACTIVE_TITLE_MAX_WIDTH + 2
-            );
-            assert_eq!(
-                marker_budget(display, 11, IslandCapsConfig::Square, true),
-                ACTIVE_TITLE_MAX_WIDTH
-            );
-        }
     }
 
     #[test]
@@ -2778,6 +2782,28 @@ mod tests {
     }
 
     #[test]
+    fn active_title_shrinks_then_falls_back_without_hiding_dots() {
+        let mut app = app_with_tabs(2, 1);
+        app.island.active_title = true;
+        app.workspaces[0].tabs[1].set_custom_name("abcdefghijklmnop".to_string());
+
+        for (width, marker_count, active_width) in [(19, 2, 10), (15, 2, 8), (14, 1, 3)] {
+            let layout = layout(&app, Rect::new(0, 0, width, 1)).expect("narrow island");
+            assert_eq!(layout.markers.len(), marker_count);
+            assert_eq!(
+                layout
+                    .markers
+                    .iter()
+                    .find(|marker| marker.tab_idx == 1)
+                    .expect("active marker")
+                    .rect
+                    .width,
+                active_width
+            );
+        }
+    }
+
+    #[test]
     fn active_label_clamps_to_three_through_sixteen_cells() {
         let mut app = app_with_tabs(2, 1);
         app.workspaces[0].tabs[1].set_custom_name("x".to_string());
@@ -2814,7 +2840,7 @@ mod tests {
                     0,
                     IslandDisplayConfig::Labels,
                     caps,
-                    false,
+                    None,
                 );
                 let inactive = marker_text_for_active(
                     &app.workspaces[0],
@@ -2822,7 +2848,7 @@ mod tests {
                     1,
                     IslandDisplayConfig::Labels,
                     caps,
-                    false,
+                    None,
                 );
 
                 assert!(display_width(&active) + caps_width(caps) >= display_width(&inactive));
@@ -2832,24 +2858,30 @@ mod tests {
     }
 
     #[test]
-    fn oversized_label_island_falls_back_to_a_clickable_dot() {
+    fn oversized_label_island_renders_clickable_untitled_dots() {
         let area = Rect::new(0, 0, 27, 1);
-        let mut app = app_with_tabs(11, 10);
+        let mut app = app_with_tabs(11, 1);
         app.island.display = IslandDisplayConfig::Labels;
-        app.workspaces[0].tabs[10].set_custom_name("a very long island label".to_string());
+        app.island.active_title = true;
+        app.workspaces[0].tabs[1].set_custom_name("a very long island label".to_string());
 
-        let hit_area = compute_tab_bar_view(&app, area).island_marker_hit_areas[10];
-        assert!(hit_area.width > 0);
+        let layout = layout(&app, area).expect("fallback island");
+        assert_eq!(layout.display, IslandDisplayConfig::Dots);
+        assert_eq!(layout.markers[0].text, ROUND_DOT);
+        assert_eq!(layout.markers[1].text, "   ");
+        let hit_areas = compute_tab_bar_view(&app, area).island_marker_hit_areas;
+        assert!(hit_areas[0].width > 0);
+        assert!(hit_areas[1].width > 0);
 
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).expect("test terminal");
         terminal
             .draw(|frame| render_tab_bar(&app, frame, area))
             .expect("draw fallback island");
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(hit_areas[0].x, hit_areas[0].y)].symbol(), ROUND_DOT);
         assert_eq!(
-            terminal.backend().buffer()[(hit_area.x, hit_area.y)]
-                .style()
-                .bg,
+            buffer[(hit_areas[1].x, hit_areas[1].y)].style().bg,
             Some(app.palette.accent)
         );
     }
