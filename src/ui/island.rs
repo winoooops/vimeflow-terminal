@@ -385,12 +385,13 @@ fn active_title_marker_text(
 }
 
 /// Strip control characters (newlines, tabs, CR, …) from a tab name and
-/// reject anything with no rendered width, so hostile API labels can never
-/// produce an invisible or line-broken marker — the caller falls back to the
-/// index/untitled form on None. Guards the class, not individual characters.
+/// reject anything that renders as nothing visible — zero rendered width or
+/// whitespace only — so hostile API labels can never produce an invisible or
+/// line-broken marker; the caller falls back to the index/untitled form on
+/// None. Guards the class, not individual characters.
 fn sanitized_label(name: &str) -> Option<String> {
     let cleaned: String = name.chars().filter(|c| !c.is_control()).collect();
-    (display_width(&cleaned) > 0).then_some(cleaned)
+    (display_width(&cleaned) > 0 && !cleaned.trim().is_empty()).then_some(cleaned)
 }
 
 fn marker_text_for_active(
@@ -3010,6 +3011,26 @@ mod tests {
                 0
             ),
             "2"
+        );
+
+        // Whitespace-only names render as invisible spaces on the capsule bg
+        // in square mode — they fall back like empty.
+        app.workspaces[0].tabs[1].set_custom_name("   ".to_string());
+        let ws = &app.workspaces[0];
+        assert_eq!(
+            marker_text_for_active(
+                ws,
+                1,
+                0,
+                IslandDisplayConfig::Labels,
+                IslandCapsConfig::Square,
+                0
+            ),
+            "2"
+        );
+        assert_eq!(
+            active_title_marker_text(ws, 1, IslandDisplayConfig::Numbers, true),
+            " 2 "
         );
     }
 
