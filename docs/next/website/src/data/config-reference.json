@@ -805,7 +805,7 @@
           "key": "ui.island.active_title",
           "type": "boolean",
           "default": "true",
-          "description": "Show the active tab title beside its dot or number. Labels mode is unchanged. Reloads live."
+          "description": "Show the active tab title in the pill: beside the circle in dots mode, replacing the number in numbers mode. Labels mode is unchanged. Reloads live."
         },
         {
           "key": "ui.agent_panel_sort",
