@@ -856,13 +856,31 @@ pub enum IslandMotionConfig {
     Off,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct IslandConfig {
     pub position: IslandPositionConfig,
     pub display: IslandDisplayConfig,
     pub caps: IslandCapsConfig,
     pub motion: IslandMotionConfig,
+    #[serde(default = "default_true")]
+    pub active_title: bool,
+}
+
+impl Default for IslandConfig {
+    fn default() -> Self {
+        Self {
+            position: IslandPositionConfig::default(),
+            display: IslandDisplayConfig::default(),
+            caps: IslandCapsConfig::default(),
+            motion: IslandMotionConfig::default(),
+            active_title: default_true(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -1411,6 +1429,14 @@ tab_bar_position = "bottom"
         assert_eq!(config.ui.island.display, IslandDisplayConfig::Dots);
         assert_eq!(config.ui.island.caps, IslandCapsConfig::Round);
         assert_eq!(config.ui.island.motion, IslandMotionConfig::Smooth);
+        assert!(config.ui.island.active_title);
+        assert!(
+            toml::from_str::<Config>("[ui.island]\ndisplay = \"numbers\"\n")
+                .unwrap()
+                .ui
+                .island
+                .active_title
+        );
     }
 
     #[test]
@@ -1433,12 +1459,14 @@ tab_bar_style = "classic"
 [ui.island]
 position = "left"
 display = "labels"
+active_title = false
 "#,
         )
         .unwrap();
 
         assert_eq!(config.ui.island.position, IslandPositionConfig::Left);
         assert_eq!(config.ui.island.display, IslandDisplayConfig::Labels);
+        assert!(!config.ui.island.active_title);
     }
 
     #[test]

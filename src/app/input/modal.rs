@@ -563,6 +563,7 @@ pub(super) fn apply_rename_action(state: &mut AppState, action: ModalAction) {
                                     state.mark_session_dirty();
                                     if state.island.display
                                         == crate::config::IslandDisplayConfig::Labels
+                                        || state.island.active_title
                                     {
                                         // A renamed label changes the animated
                                         // endpoint geometry while the in-flight

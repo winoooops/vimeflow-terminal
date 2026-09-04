@@ -3502,6 +3502,36 @@ mod tests {
     }
 
     #[test]
+    fn empty_inactive_label_is_hit_testable_for_both_cap_styles() {
+        for caps in [
+            crate::config::IslandCapsConfig::Round,
+            crate::config::IslandCapsConfig::Square,
+        ] {
+            let mut app = app_for_mouse_test();
+            let mut ws = Workspace::test_new("one");
+            ws.test_add_tab(Some(""));
+            app.state.workspaces = vec![ws];
+            app.state.active = Some(0);
+            app.state.selected = 0;
+            app.state.mode = Mode::Terminal;
+            app.state.island.display = crate::config::IslandDisplayConfig::Labels;
+            app.state.island.caps = caps;
+
+            crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+            let marker = app.state.view.island_marker_hit_areas[1];
+
+            assert_eq!(
+                marker.width,
+                match caps {
+                    crate::config::IslandCapsConfig::Round => 3,
+                    crate::config::IslandCapsConfig::Square => 1,
+                }
+            );
+            assert_eq!(app.state.tab_at(marker.x, marker.y), Some(1));
+        }
+    }
+
+    #[test]
     fn one_cell_island_marker_drag_still_focuses_tab() {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("one");

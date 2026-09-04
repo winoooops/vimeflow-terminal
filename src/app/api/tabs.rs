@@ -168,7 +168,9 @@ impl App {
             // old geometry lingers until the next refresh (e.g. a tab switch),
             // leaving the visible label stale. Mirrors handle_tab_move.
             self.state.refresh_tab_bar_view();
-            if self.state.island.display == crate::config::IslandDisplayConfig::Labels {
+            if self.state.island.display == crate::config::IslandDisplayConfig::Labels
+                || self.state.island.active_title
+            {
                 // A renamed label changes the animated endpoint geometry while
                 // the in-flight springs still target pre-rename widths; snap
                 // instead of settling against obsolete targets.
@@ -438,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn api_tab_rename_clears_island_animation_only_for_labels_display() {
+    fn api_tab_rename_clears_island_animation_when_titles_render() {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
             &Config::default(),
@@ -455,6 +457,7 @@ mod tests {
         let tab_id = app.public_tab_id(0, 1).unwrap();
 
         app.state.island.display = crate::config::IslandDisplayConfig::Dots;
+        app.state.island.active_title = false;
         app.state.island_anim = Some(island_anim());
         let response = app.handle_tab_rename(
             "req".into(),
@@ -466,10 +469,26 @@ mod tests {
         serde_json::from_str::<SuccessResponse>(&response).unwrap();
         assert!(
             app.state.island_anim.is_some(),
-            "dots display keeps the animation on rename"
+            "untitled dots keep the animation on rename"
+        );
+
+        app.state.island.active_title = true;
+        let response = app.handle_tab_rename(
+            "req".into(),
+            TabRenameParams {
+                tab_id: tab_id.clone(),
+                label: "renamed-with-title".into(),
+            },
+        );
+        serde_json::from_str::<SuccessResponse>(&response).unwrap();
+        assert!(
+            app.state.island_anim.is_none(),
+            "titled dots snap the animation on rename"
         );
 
         app.state.island.display = crate::config::IslandDisplayConfig::Labels;
+        app.state.island.active_title = false;
+        app.state.island_anim = Some(island_anim());
         let response = app.handle_tab_rename(
             "req".into(),
             TabRenameParams {
