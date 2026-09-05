@@ -2680,7 +2680,7 @@ mod tests {
         app.state.selected = 0;
         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         app.state.toast_config.delay_seconds = 0;
-        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Silent;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Toast;
         let target_terminal_id = app.state.workspaces[1]
             .panes
             .get(&target_pane)
@@ -2703,6 +2703,13 @@ mod tests {
                 process_exited: false,
                 observed_at: std::time::Instant::now(),
             });
+        let toast = app.state.toast.as_ref().expect("island arrival toast");
+        let record_id = toast.island_record_id.expect("island record id");
+        assert!(toast.target.is_none());
+        assert_eq!(
+            app.state.island_records.front().map(|record| record.id),
+            Some(record_id)
+        );
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
 
         let hit = app.state.view.toast_hit_area;
@@ -2714,6 +2721,12 @@ mod tests {
 
         assert_eq!(app.state.active, Some(1));
         assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(target_pane));
+        assert!(app
+            .state
+            .island_records
+            .iter()
+            .find(|record| record.id == record_id)
+            .is_some_and(|record| record.read));
         assert!(app.state.toast.is_none());
         assert_eq!(app.state.mode, Mode::Terminal);
 

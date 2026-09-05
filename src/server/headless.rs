@@ -1944,9 +1944,18 @@ impl HeadlessServer {
         })
     }
 
+    fn newest_island_record_id(&self) -> Option<u64> {
+        self.app
+            .state
+            .island_records
+            .front()
+            .map(|record| record.id)
+    }
+
     fn forward_pane_state_update_notifications_to_clients(
         &mut self,
         update: &crate::app::actions::PaneStateUpdate,
+        deliver_stock_toast: bool,
     ) {
         if self.app.state.toast_config.delay_seconds != 0 {
             return;
@@ -1977,7 +1986,9 @@ impl HeadlessServer {
             }
         }
 
-        if !should_forward_toast_to_clients(self.app.state.toast_config.delivery) {
+        if !deliver_stock_toast
+            || !should_forward_toast_to_clients(self.app.state.toast_config.delivery)
+        {
             return;
         }
         let Some(kind) = crate::app::actions::notification_toast_for_pane_state_update(
@@ -2216,6 +2227,7 @@ impl HeadlessServer {
             AppEvent::StateChanged { pane_id, agent, .. } => {
                 // Capture toast before handling.
                 let toast_before = self.app.state.toast.clone();
+                let island_record_before = self.newest_island_record_id();
                 let pane_id_val = *pane_id;
                 let agent_val = *agent;
 
@@ -2247,6 +2259,7 @@ impl HeadlessServer {
 
                 let next_state = self.pane_effective_state(pane_id_val);
                 let next_agent_label = self.pane_effective_agent_label(pane_id_val);
+                let island_arrived = self.newest_island_record_id() != island_record_before;
 
                 if self.app.state.toast_config.delay_seconds == 0
                     && self.app.state.sound.allows(agent_val)
@@ -2271,7 +2284,9 @@ impl HeadlessServer {
                 let toast_msg = if self.app.state.toast_config.delay_seconds == 0
                     && should_forward_toast_to_clients(self.app.state.toast_config.delivery)
                 {
-                    if self.app.state.toast.as_ref().is_some_and(|toast| {
+                    if island_arrived {
+                        None
+                    } else if self.app.state.toast.as_ref().is_some_and(|toast| {
                         toast.island_record_id.is_none() && self.app.state.toast != toast_before
                     }) {
                         self.app
@@ -2312,6 +2327,7 @@ impl HeadlessServer {
                 // Hook reports can be stale or no-op after sequence rejection.
                 // Forward only effective state changes observed after handling.
                 let toast_before = self.app.state.toast.clone();
+                let island_record_before = self.newest_island_record_id();
                 let pane_id_val = *pane_id;
                 let agent_val = crate::detect::parse_agent_label(agent_label);
 
@@ -2341,6 +2357,7 @@ impl HeadlessServer {
 
                 let next_state = self.pane_effective_state(pane_id_val);
                 let next_agent_label = self.pane_effective_agent_label(pane_id_val);
+                let island_arrived = self.newest_island_record_id() != island_record_before;
 
                 if self.app.state.toast_config.delay_seconds == 0
                     && self.app.state.sound.allows(agent_val)
@@ -2365,7 +2382,9 @@ impl HeadlessServer {
                 let toast_msg = if self.app.state.toast_config.delay_seconds == 0
                     && should_forward_toast_to_clients(self.app.state.toast_config.delivery)
                 {
-                    if self.app.state.toast.as_ref().is_some_and(|toast| {
+                    if island_arrived {
+                        None
+                    } else if self.app.state.toast.as_ref().is_some_and(|toast| {
                         toast.island_record_id.is_none() && self.app.state.toast != toast_before
                     }) {
                         self.app
@@ -2438,6 +2457,7 @@ impl HeadlessServer {
             }
             AppEvent::PaneDied { pane_id } => {
                 let pane_id_val = *pane_id;
+                let island_record_before = self.newest_island_record_id();
                 let terminal_id = self.app.state.workspaces.iter().find_map(|ws| {
                     ws.tabs.iter().find_map(|tab| {
                         tab.panes
@@ -2451,7 +2471,11 @@ impl HeadlessServer {
                     .publish_pane_process_exit_if_agent(pane_id_val)
                 {
                     self.app.emit_pane_state_update(&update);
-                    self.forward_pane_state_update_notifications_to_clients(&update);
+                    let island_arrived = self.newest_island_record_id() != island_record_before;
+                    self.forward_pane_state_update_notifications_to_clients(
+                        &update,
+                        !island_arrived,
+                    );
                 }
 
                 self.app.handle_internal_event(ev);
@@ -4064,6 +4088,7 @@ impl HeadlessServer {
             && self.app.state.context_menu.is_none()
             && self.app.state.toast.is_none()
             && self.app.state.copy_feedback.is_none()
+            && !self.app.state.island_panel_open
             && !self.app.full_redraw_pending
     }
 
@@ -9526,7 +9551,7 @@ next_tab = ""
     }
 
     #[tokio::test]
-    async fn retained_pty_update_declines_unsafe_mode_without_consuming_dirty_rows() {
+    async fn retained_pty_update_declines_unsafe_app_state_without_consuming_dirty_rows() {
         let (mut server, client_rx, pane_id) = retained_test_server(b"aaaa");
         server.render_and_stream();
         let _ = client_rx
@@ -9545,6 +9570,11 @@ next_tab = ""
         assert!(client_rx.recv_timeout(Duration::from_millis(50)).is_err());
 
         server.app.state.mode = crate::app::Mode::Terminal;
+        server.app.state.island_panel_open = true;
+        assert!(!server.render_retained_pty_update_and_stream());
+        assert!(client_rx.recv_timeout(Duration::from_millis(50)).is_err());
+
+        server.app.state.island_panel_open = false;
         assert!(server.render_retained_pty_update_and_stream());
         let patched = read_server_frame(
             client_rx
@@ -10648,7 +10678,7 @@ next_tab = ""
     }
 
     #[test]
-    fn zero_delay_island_arrival_forwards_stock_system_notification_for_inactive_target() {
+    fn zero_delay_island_arrival_does_not_forward_a_second_system_toast() {
         let mut server = test_headless_server();
         let background = crate::workspace::Workspace::test_new("background");
         let pane_id = background.tabs[0].root_pane;
@@ -10684,22 +10714,12 @@ next_tab = ""
             .toast
             .as_ref()
             .is_some_and(|toast| toast.island_record_id.is_some()));
-        match read_server_message(
+        assert!(
             client_control_rx
-                .recv_timeout(Duration::from_millis(100))
-                .expect("stock system notification"),
-        ) {
-            ServerMessage::Notify {
-                kind,
-                message,
-                body,
-            } => {
-                assert_eq!(kind, protocol::NotifyKind::SystemToast);
-                assert_eq!(message, "pi needs attention");
-                assert_eq!(body.as_deref(), Some("background · 1"));
-            }
-            other => panic!("expected stock system notification, got {other:?}"),
-        }
+                .recv_timeout(Duration::from_millis(50))
+                .is_err(),
+            "island arrival must not forward a second stock toast"
+        );
     }
 
     #[test]
@@ -10826,12 +10846,6 @@ next_tab = ""
                 .recv_timeout(Duration::from_millis(100))
                 .expect("delayed sound message"),
         );
-        let second = read_server_message(
-            client_control_rx
-                .recv_timeout(Duration::from_millis(100))
-                .expect("delayed toast message"),
-        );
-
         assert!(matches!(
             first,
             ServerMessage::Notify {
@@ -10839,18 +10853,12 @@ next_tab = ""
                 ..
             }
         ));
-        match second {
-            ServerMessage::Notify {
-                kind,
-                message,
-                body,
-            } => {
-                assert_eq!(kind, protocol::NotifyKind::SystemToast);
-                assert_eq!(message, "pi needs attention");
-                assert_eq!(body.as_deref(), Some("background · 1"));
-            }
-            other => panic!("expected delayed system toast, got {other:?}"),
-        }
+        assert!(
+            client_control_rx
+                .recv_timeout(Duration::from_millis(50))
+                .is_err(),
+            "delayed island arrival must not forward a second stock toast"
+        );
         assert!(server.app.state.pending_agent_notifications.is_empty());
         assert_eq!(server.app.state.island_records.len(), 1);
         assert_eq!(server.app.state.island_records[0].id, record_id);

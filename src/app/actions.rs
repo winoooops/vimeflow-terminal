@@ -23,6 +23,10 @@ use super::state::{
     PendingAgentNotification, ToastKind, ToastNotification, ToastTarget, ViewLayout,
 };
 
+struct IslandArrival {
+    toast: Option<ToastNotification>,
+}
+
 fn is_background_completion_transition(prev_state: AgentState, new_state: AgentState) -> bool {
     matches!(new_state, AgentState::Idle)
         && matches!(prev_state, AgentState::Working | AgentState::Blocked)
@@ -1074,6 +1078,17 @@ impl AppState {
         }
     }
 
+    fn clear_orphaned_island_toast(&mut self) {
+        let orphaned = self
+            .toast
+            .as_ref()
+            .and_then(|toast| toast.island_record_id)
+            .is_some_and(|id| !self.island_records.iter().any(|record| record.id == id));
+        if orphaned {
+            self.toast = None;
+        }
+    }
+
     pub(crate) fn push_island_record(&mut self, mut record: IslandRecord) -> Option<u64> {
         let previous_bell_width = self.island_bell_width();
         let id = self.next_island_record_id.checked_add(1)?;
@@ -1086,43 +1101,29 @@ impl AppState {
         self.island_records.push_front(record);
         self.island_records.truncate(Self::ISLAND_RECORD_CAPACITY);
         self.clamp_island_panel_selection();
+        self.clear_orphaned_island_toast();
         self.clear_island_animation_if_bell_width_changed(previous_bell_width);
         Some(id)
     }
 
     pub(crate) fn clear_island_records(&mut self) {
         let previous_bell_width = self.island_bell_width();
-        let clear_toast = self
-            .toast
-            .as_ref()
-            .and_then(|toast| toast.island_record_id)
-            .is_some_and(|id| self.island_records.iter().any(|record| record.id == id));
         self.island_records.clear();
-        if clear_toast {
-            self.toast = None;
-        }
         self.island_panel_open = false;
         self.island_panel_list.highlighted = 0;
+        self.clear_orphaned_island_toast();
         self.clear_island_animation_if_bell_width_changed(previous_bell_width);
     }
 
     fn prune_island_records(&mut self, pane_ids: &[PaneId]) {
         let previous_bell_width = self.island_bell_width();
-        let clear_toast = self
-            .toast
-            .as_ref()
-            .and_then(|toast| toast.island_record_id)
-            .and_then(|id| self.island_records.iter().find(|record| record.id == id))
-            .is_some_and(|record| pane_ids.contains(&record.pane_id));
         self.island_records
             .retain(|record| !pane_ids.contains(&record.pane_id));
-        if clear_toast {
-            self.toast = None;
-        }
         if self.island_records.is_empty() {
             self.island_panel_open = false;
         }
         self.clamp_island_panel_selection();
+        self.clear_orphaned_island_toast();
         self.clear_island_animation_if_bell_width_changed(previous_bell_width);
     }
 }
@@ -3268,17 +3269,19 @@ impl AppState {
         let seen = pane.seen;
         let notification_kind = notification_kind_for_effective_state_change(change);
 
-        if let Some(delivery) =
-            self.record_or_deliver_agent_notification(ws_idx, pane_id, change, notification_kind)
-        {
+        let island_arrival =
+            self.island_arrival_for_change(ws_idx, pane_id, change, notification_kind);
+        let deliver_stock_toast = island_arrival.is_none();
+        if let Some(delivery) = self.record_or_deliver_agent_notification(
+            ws_idx,
+            pane_id,
+            change,
+            notification_kind,
+            deliver_stock_toast,
+        ) {
             self.apply_agent_notification_delivery(&delivery);
         }
-        if let Some(toast) =
-            self.island_arrival_for_change(ws_idx, pane_id, change, notification_kind)
-        {
-            if let Some(pending) = self.pending_agent_notifications.get_mut(&pane_id) {
-                pending.island_toast_emitted = true;
-            }
+        if let Some(toast) = island_arrival.and_then(|arrival| arrival.toast) {
             self.toast = Some(toast);
         }
 
@@ -3291,7 +3294,7 @@ impl AppState {
         pane_id: PaneId,
         change: &EffectiveStateChange,
         notification_kind: Option<ToastKind>,
-    ) -> Option<ToastNotification> {
+    ) -> Option<IslandArrival> {
         if self.tab_bar_style != crate::config::TabBarStyleConfig::Island
             || (self.active == Some(ws_idx)
                 && self.workspaces.get(ws_idx)?.focused_pane_id() == Some(pane_id))
@@ -3332,19 +3335,21 @@ impl AppState {
             read: false,
         })?;
 
-        (self.island.arrivals == crate::config::IslandArrivalsConfig::Toast).then(|| {
-            ToastNotification {
-                kind,
-                title: format!(
-                    "{} {}",
-                    toast_agent_label(&agent_label),
-                    toast_event_text(kind)
-                ),
-                context,
-                position: None,
-                target: None,
-                island_record_id: Some(record_id),
-            }
+        Some(IslandArrival {
+            toast: (self.island.arrivals == crate::config::IslandArrivalsConfig::Toast).then(
+                || ToastNotification {
+                    kind,
+                    title: format!(
+                        "{} {}",
+                        toast_agent_label(&agent_label),
+                        toast_event_text(kind)
+                    ),
+                    context,
+                    position: None,
+                    target: None,
+                    island_record_id: Some(record_id),
+                },
+            ),
         })
     }
 
@@ -3354,6 +3359,7 @@ impl AppState {
         pane_id: PaneId,
         change: &EffectiveStateChange,
         notification_kind: Option<ToastKind>,
+        deliver_stock_toast: bool,
     ) -> Option<AgentNotificationDelivery> {
         self.pending_agent_notifications.remove(&pane_id);
 
@@ -3362,7 +3368,8 @@ impl AppState {
             active_tab_suppresses_notifications(is_active_tab, self.outer_terminal_focus);
 
         let kind = notification_kind?;
-        let client_notification_kind = (!suppress_active_tab_notifications).then_some(kind);
+        let client_notification_kind =
+            (deliver_stock_toast && !suppress_active_tab_notifications).then_some(kind);
         let sound = sound_for_toast_kind(kind, suppress_active_tab_notifications);
         if client_notification_kind.is_none() && sound.is_none() {
             return None;
@@ -3384,6 +3391,7 @@ impl AppState {
                 known_agent,
                 kind,
                 change.state,
+                deliver_stock_toast,
             );
         }
 
@@ -3396,6 +3404,7 @@ impl AppState {
                 known_agent,
                 kind,
                 state: change.state,
+                deliver_stock_toast,
                 deadline: {
                     let now = std::time::Instant::now();
                     let delay_seconds = self
@@ -3405,7 +3414,6 @@ impl AppState {
                     now.checked_add(std::time::Duration::from_secs(delay_seconds))
                         .unwrap_or(now)
                 },
-                island_toast_emitted: false,
             },
         );
         None
@@ -3420,6 +3428,7 @@ impl AppState {
         known_agent: Option<Agent>,
         kind: ToastKind,
         expected_state: AgentState,
+        deliver_stock_toast: bool,
     ) -> Option<AgentNotificationDelivery> {
         let terminal_state = self
             .workspaces
@@ -3462,8 +3471,9 @@ impl AppState {
                 island_record_id: None,
             }
         };
-        let toast = (!is_active_tab).then(build_toast);
-        let client_notification = (!suppress_active_tab_notifications).then(build_toast);
+        let toast = (deliver_stock_toast && !is_active_tab).then(build_toast);
+        let client_notification =
+            (deliver_stock_toast && !suppress_active_tab_notifications).then(build_toast);
 
         if toast.is_none() && client_notification.is_none() && sound.is_none() {
             return None;
@@ -3527,7 +3537,7 @@ impl AppState {
             else {
                 continue;
             };
-            let Some(mut delivery) = self.agent_notification_delivery(
+            let Some(delivery) = self.agent_notification_delivery(
                 ws_idx,
                 pending.pane_id,
                 pending.workspace_id,
@@ -3535,12 +3545,10 @@ impl AppState {
                 pending.known_agent,
                 pending.kind,
                 pending.state,
+                pending.deliver_stock_toast,
             ) else {
                 continue;
             };
-            if pending.island_toast_emitted {
-                delivery.toast = None;
-            }
             self.apply_agent_notification_delivery(&delivery);
             deliveries.push(delivery);
         }
@@ -3703,17 +3711,6 @@ mod tests {
         }
     }
 
-    fn test_toast(island_record_id: Option<u64>) -> ToastNotification {
-        ToastNotification {
-            kind: ToastKind::Finished,
-            title: "test toast".into(),
-            context: String::new(),
-            position: None,
-            target: None,
-            island_record_id,
-        }
-    }
-
     fn report_detected_state(
         state: &mut AppState,
         pane_id: PaneId,
@@ -3826,7 +3823,7 @@ mod tests {
     #[test]
     fn clearing_island_records_closes_the_panel() {
         let mut state = AppState::test_new();
-        let record_id = state
+        state
             .push_island_record(island_record(
                 PaneId::from_raw(9),
                 IslandReason::TurnComplete,
@@ -3834,21 +3831,73 @@ mod tests {
                 1,
             ))
             .expect("test record id");
-        state.toast = Some(test_toast(Some(record_id)));
         state.set_island_panel_open(true);
 
         state.clear_island_records();
 
         assert!(state.island_records.is_empty());
-        assert!(state.toast.is_none());
         assert!(!state.island_panel_open);
         assert_eq!(state.island_stage(), IslandStage::Pill);
-
-        let unrelated_toast = test_toast(None);
-        state.toast = Some(unrelated_toast.clone());
-        state.clear_island_records();
-        assert_eq!(state.toast, Some(unrelated_toast));
         state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn removing_island_records_clears_their_arrival_toast() {
+        for clear_all in [false, true] {
+            let mut state = AppState::test_new();
+            let pane_id = PaneId::from_raw(9);
+            let record_id = state
+                .push_island_record(island_record(
+                    pane_id,
+                    IslandReason::TurnComplete,
+                    "done",
+                    1,
+                ))
+                .expect("test record id");
+            state.toast = Some(ToastNotification {
+                kind: ToastKind::Finished,
+                title: "codex turn complete".into(),
+                context: "test".into(),
+                position: None,
+                target: None,
+                island_record_id: Some(record_id),
+            });
+            if !clear_all {
+                state
+                    .push_island_record(island_record(
+                        PaneId::from_raw(10),
+                        IslandReason::Blocked,
+                        "survivor",
+                        2,
+                    ))
+                    .expect("surviving test record id");
+            }
+
+            if clear_all {
+                state.clear_island_records();
+            } else {
+                state.remove_plugin_pane_records([pane_id]);
+            }
+
+            assert_eq!(state.island_records.is_empty(), clear_all);
+            assert!(state.toast.is_none());
+
+            let unrelated_toast = ToastNotification {
+                kind: ToastKind::Finished,
+                title: "unrelated".into(),
+                context: String::new(),
+                position: None,
+                target: None,
+                island_record_id: None,
+            };
+            state.toast = Some(unrelated_toast.clone());
+            if clear_all {
+                state.clear_island_records();
+            } else {
+                state.remove_plugin_pane_records([PaneId::from_raw(10)]);
+            }
+            assert_eq!(state.toast, Some(unrelated_toast));
+        }
     }
 
     #[test]
@@ -3935,17 +3984,11 @@ mod tests {
         let mut state = AppState::test_new();
         let removed = PaneId::from_raw(10);
         let survivor = PaneId::from_raw(11);
-        let removed_toast_id = state
-            .push_island_record(island_record(
-                removed,
-                IslandReason::TurnComplete,
-                "removed",
-                1,
-            ))
-            .expect("removed-pane test record id");
-        state
-            .push_island_record(island_record(removed, IslandReason::Blocked, "removed", 1))
-            .expect("removed-pane test record id");
+        for reason in [IslandReason::TurnComplete, IslandReason::Blocked] {
+            state
+                .push_island_record(island_record(removed, reason, "removed", 1))
+                .expect("removed-pane test record id");
+        }
         state
             .push_island_record(island_record(
                 survivor,
@@ -3954,22 +3997,17 @@ mod tests {
                 2,
             ))
             .expect("surviving test record id");
-        state.toast = Some(test_toast(Some(removed_toast_id)));
         state.set_island_panel_open(true);
 
         state.remove_plugin_pane_records([removed]);
 
         assert_eq!(state.island_records.len(), 1);
         assert_eq!(state.island_records[0].pane_id, survivor);
-        assert!(state.toast.is_none());
         assert_eq!(state.island_stage(), IslandStage::Panel);
 
-        let unrelated_toast = test_toast(None);
-        state.toast = Some(unrelated_toast.clone());
         state.remove_plugin_pane_records([survivor]);
 
         assert!(state.island_records.is_empty());
-        assert_eq!(state.toast, Some(unrelated_toast));
         assert!(!state.island_panel_open);
         assert_eq!(state.island_stage(), IslandStage::Pill);
         state.assert_invariants_for_test();
@@ -4075,6 +4113,7 @@ mod tests {
     #[test]
     fn silent_island_arrival_records_without_a_toast() {
         let mut state = app_with_workspaces(&["active", "background"]);
+        state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         let pane_id = state.workspaces[1].tabs[0].root_pane;
 
         report_detected_state(&mut state, pane_id, Agent::Codex, AgentState::Blocked);
@@ -4104,6 +4143,38 @@ mod tests {
         assert_eq!(finished_toast.kind, ToastKind::Finished);
         assert_eq!(finished_toast.island_record_id, Some(finished_id));
         assert!(finished_toast.target.is_none());
+    }
+
+    #[test]
+    fn delayed_island_arrival_suppresses_the_stock_toast_only() {
+        let mut state = app_with_workspaces(&["active", "background"]);
+        state.island.arrivals = crate::config::IslandArrivalsConfig::Toast;
+        state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
+        state.toast_config.delay_seconds = 1;
+        state.sound.enabled = true;
+        let pane_id = state.workspaces[1].tabs[0].root_pane;
+
+        report_detected_state(&mut state, pane_id, Agent::Pi, AgentState::Blocked);
+
+        let record_id = state.island_records.front().expect("island record").id;
+        assert!(state
+            .pending_agent_notifications
+            .get(&pane_id)
+            .is_some_and(|pending| !pending.deliver_stock_toast));
+        let deadline = state
+            .next_pending_agent_notification_deadline()
+            .expect("sound delivery deadline");
+        let deliveries = state.drain_due_agent_notifications(deadline);
+        assert_eq!(deliveries.len(), 1);
+        assert!(deliveries[0].toast.is_none());
+        assert!(deliveries[0].client_notification.is_none());
+        assert_eq!(
+            state
+                .toast
+                .as_ref()
+                .and_then(|toast| toast.island_record_id),
+            Some(record_id)
+        );
     }
 
     fn insert_test_pane_graphics_layer(state: &mut AppState, pane_id: PaneId) {
@@ -5657,6 +5728,7 @@ mod tests {
     #[test]
     fn state_changed_idle_in_background_marks_unseen() {
         let mut state = app_with_workspaces(&["active", "background"]);
+        state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         state.active = Some(0);
         let bg_pane_id = *state.workspaces[1].panes.keys().next().unwrap();
@@ -5797,6 +5869,7 @@ mod tests {
     #[test]
     fn background_waiting_sets_attention_toast() {
         let mut state = app_with_workspaces(&["active", "background"]);
+        state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         state.active = Some(0);
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         let bg_pane_id = *state.workspaces[1].panes.keys().next().unwrap();
@@ -5820,6 +5893,7 @@ mod tests {
     #[test]
     fn delayed_background_waiting_schedules_before_toast() {
         let mut state = app_with_workspaces(&["active", "background"]);
+        state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         state.active = Some(0);
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         state.toast_config.delay_seconds = 1;
@@ -5965,6 +6039,7 @@ mod tests {
     #[test]
     fn hook_reported_unknown_agent_sets_toast_title_from_label() {
         let mut state = app_with_workspaces(&["active", "background"]);
+        state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         state.active = Some(0);
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         let bg_pane_id = *state.workspaces[1].panes.keys().next().unwrap();
@@ -5988,6 +6063,7 @@ mod tests {
     #[test]
     fn visible_blocker_overrides_hook_working_and_notifies() {
         let mut state = app_with_workspaces(&["active", "background"]);
+        state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         state.active = Some(0);
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         let bg_pane_id = *state.workspaces[1].panes.keys().next().unwrap();
@@ -6276,6 +6352,7 @@ mod tests {
     #[test]
     fn background_idle_sets_finished_toast() {
         let mut state = app_with_workspaces(&["active", "background"]);
+        state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         state.active = Some(0);
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         let bg_pane_id = *state.workspaces[1].panes.keys().next().unwrap();
@@ -6309,6 +6386,7 @@ mod tests {
     #[test]
     fn background_toast_includes_tab_name_when_workspace_has_multiple_tabs() {
         let mut state = app_with_workspaces(&["active", "background"]);
+        state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         state.active = Some(0);
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         state.workspaces[1].tabs[0].set_custom_name("main".into());
@@ -6335,6 +6413,7 @@ mod tests {
     #[test]
     fn background_tab_in_active_workspace_still_sets_toast() {
         let mut state = app_with_workspaces(&["active"]);
+        state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         state.active = Some(0);
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         state.workspaces[0].tabs[0].set_custom_name("main".into());
@@ -6632,6 +6711,7 @@ mod tests {
     #[test]
     fn pane_process_exit_publish_marks_agent_idle_before_pane_removal() {
         let mut state = app_with_workspaces(&["active", "background"]);
+        state.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         state.active = Some(1);
         state.ensure_test_terminals();

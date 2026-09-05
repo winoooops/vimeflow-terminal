@@ -470,6 +470,21 @@ untitled forms byte-identically.
 
 ## 6. Notifications v1 design (M2b)
 
+**Single-client scope for v1** (amended 2026-09-05, operator decision on
+the review escalation): the notification subsystem is **explicitly
+single-client in v1** — records and panel state live in `AppState`, with
+all reconciliation, input-source ownership, and interaction routed
+through the **foreground client** (as built); background app clients
+render the shared frames but do not own notification interaction. This
+is the concrete form of the original decision-5 deferral ("the server
+will take the records — but not in v1"). The committed follow-up (M2c
+scope) re-homes records as a **neutral server notification feed exposed
+through the public JSON API/event path**, with panel visibility,
+selection, and read projection owned per client — the runtime/client
+boundary's proper split, aligned with herdr's server-owned-runtime
+migration. Until then the limitation is documented in the configuration
+guide.
+
 ### Record model (AppState, private in v1)
 
 ```rust

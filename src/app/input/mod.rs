@@ -66,10 +66,7 @@ use self::{
         modal_action_from_key, ModalAction, ONBOARDING_WELCOME_ACTIONS, RELEASE_NOTES_ACTIONS,
     },
     mouse::MouseAction,
-    navigate::{
-        leave_command_mode, non_indexed_action_for_key, ActionContext, BindingDispatch,
-        NavigateAction,
-    },
+    navigate::{non_indexed_action_for_key, ActionContext, BindingDispatch, NavigateAction},
     settings::SettingsAction,
 };
 use super::state::{AppState, Mode};
@@ -84,8 +81,11 @@ impl App {
         if !self.state.island_panel_open {
             return false;
         }
+        if self.state.mode == Mode::Prefix {
+            self.handle_prefix_key(key.clone());
+            return true;
+        }
         let (dispatch, context) = match self.state.mode {
-            Mode::Prefix => (BindingDispatch::Prefix, ActionContext::Prefix),
             Mode::Navigate => (BindingDispatch::Prefix, ActionContext::Navigate),
             _ => (BindingDispatch::Direct, ActionContext::Direct),
         };
@@ -96,9 +96,6 @@ impl App {
         } else if self.state.mode != Mode::Prefix && self.state.is_prefix_key(key) {
             self.state.mode = Mode::Prefix;
         } else {
-            if self.state.mode == Mode::Prefix {
-                leave_command_mode(&mut self.state);
-            }
             handle_island_panel_key(&mut self.state, key.as_key_event());
         }
         true
@@ -978,6 +975,52 @@ mod tests {
         app.route_client_events(vec![crate::raw_input::RawInputEvent::Key(toggle)], false);
         assert!(!app.state.island_panel_open);
         assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn island_panel_prefix_c_dispatches_new_tab_without_clearing_records() {
+        let mut app = test_app();
+        seed_island_record(&mut app);
+        app.state.set_island_panel_open(true);
+        let prefix = TerminalKey::new(app.state.prefix_code, app.state.prefix_mods);
+
+        app.route_client_events(
+            vec![
+                crate::raw_input::RawInputEvent::Key(prefix),
+                crate::raw_input::RawInputEvent::Key(TerminalKey::new(
+                    KeyCode::Char('c'),
+                    KeyModifiers::empty(),
+                )),
+            ],
+            false,
+        );
+
+        assert_eq!(app.state.mode, Mode::RenameTab);
+        assert_eq!(app.state.island_records.len(), 1);
+        assert!(!app.state.island_records[0].read);
+    }
+
+    #[test]
+    fn island_panel_prefix_r_dispatches_resize_without_marking_records_read() {
+        let mut app = test_app();
+        seed_island_record(&mut app);
+        app.state.set_island_panel_open(true);
+        let prefix = TerminalKey::new(app.state.prefix_code, app.state.prefix_mods);
+
+        app.route_client_events(
+            vec![
+                crate::raw_input::RawInputEvent::Key(prefix),
+                crate::raw_input::RawInputEvent::Key(TerminalKey::new(
+                    KeyCode::Char('r'),
+                    KeyModifiers::empty(),
+                )),
+            ],
+            false,
+        );
+
+        assert_eq!(app.state.mode, Mode::Resize);
+        assert_eq!(app.state.island_records.len(), 1);
+        assert!(!app.state.island_records[0].read);
     }
 
     #[test]

@@ -2673,11 +2673,11 @@ mod tests {
         let notification_deadline = app
             .state
             .next_pending_agent_notification_deadline()
-            .expect("pending notification deadline");
+            .expect("pending sound deadline");
         assert!(notification_deadline < toast_deadline);
         app.next_resize_poll = toast_deadline + Duration::from_secs(1);
 
-        assert!(app.handle_scheduled_tasks(notification_deadline, false));
+        assert!(!app.handle_scheduled_tasks(notification_deadline, false));
         assert_eq!(app.state.toast, Some(arrival_toast));
         assert_eq!(app.toast_deadline, Some(toast_deadline));
 

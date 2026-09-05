@@ -1370,8 +1370,8 @@ pub struct PendingAgentNotification {
     pub known_agent: Option<crate::detect::Agent>,
     pub kind: ToastKind,
     pub state: AgentState,
+    pub deliver_stock_toast: bool,
     pub deadline: std::time::Instant,
-    pub island_toast_emitted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
