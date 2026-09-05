@@ -383,6 +383,8 @@ pub struct KeysConfig {
     pub reload_config: BindingConfig,
     /// Focus the currently visible notification target. Default: "prefix+o".
     pub open_notification_target: BindingConfig,
+    /// Toggle the island notification panel. Default: "prefix+i".
+    pub island_panel_toggle: BindingConfig,
     /// Select the previous workspace. Unset by default.
     pub previous_workspace: BindingConfig,
     /// Select the next workspace. Unset by default.
@@ -503,6 +505,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     open_notification_target: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    island_panel_toggle: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     previous_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_workspace: Option<BindingConfig>,
@@ -611,6 +615,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(detach);
         apply_field!(reload_config);
         apply_field!(open_notification_target);
+        apply_field!(island_panel_toggle);
         apply_field!(previous_workspace);
         apply_field!(next_workspace);
         apply_field!(previous_agent);
@@ -709,6 +714,7 @@ impl KeysConfig {
         copy_effective_action_field!(detach, keybinds.detach);
         copy_effective_action_field!(reload_config, keybinds.reload_config);
         copy_effective_action_field!(open_notification_target, keybinds.open_notification_target);
+        copy_effective_action_field!(island_panel_toggle, keybinds.island_panel_toggle);
         copy_effective_action_field!(previous_workspace, keybinds.previous_workspace);
         copy_effective_action_field!(next_workspace, keybinds.next_workspace);
         copy_effective_action_field!(previous_agent, keybinds.previous_agent);
@@ -856,7 +862,15 @@ pub enum IslandMotionConfig {
     Off,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandArrivalsConfig {
+    #[default]
+    Toast,
+    Silent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct IslandConfig {
     pub position: IslandPositionConfig,
@@ -865,6 +879,9 @@ pub struct IslandConfig {
     pub motion: IslandMotionConfig,
     #[serde(default = "default_true")]
     pub active_title: bool,
+    pub arrivals: IslandArrivalsConfig,
+    #[serde(default = "default_island_bell")]
+    pub bell: String,
 }
 
 impl Default for IslandConfig {
@@ -875,12 +892,18 @@ impl Default for IslandConfig {
             caps: IslandCapsConfig::default(),
             motion: IslandMotionConfig::default(),
             active_title: default_true(),
+            arrivals: IslandArrivalsConfig::default(),
+            bell: default_island_bell(),
         }
     }
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_island_bell() -> String {
+    "🔔".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -1063,6 +1086,7 @@ impl Default for KeysConfig {
             detach: BindingConfig::one("prefix+q"),
             reload_config: BindingConfig::one("prefix+shift+r"),
             open_notification_target: BindingConfig::one("prefix+o"),
+            island_panel_toggle: BindingConfig::one("prefix+i"),
             previous_workspace: BindingConfig::empty(),
             next_workspace: BindingConfig::empty(),
             previous_agent: BindingConfig::empty(),
@@ -1430,13 +1454,15 @@ tab_bar_position = "bottom"
         assert_eq!(config.ui.island.caps, IslandCapsConfig::Round);
         assert_eq!(config.ui.island.motion, IslandMotionConfig::Smooth);
         assert!(config.ui.island.active_title);
-        assert!(
-            toml::from_str::<Config>("[ui.island]\ndisplay = \"numbers\"\n")
-                .unwrap()
-                .ui
-                .island
-                .active_title
-        );
+        assert_eq!(config.ui.island.arrivals, IslandArrivalsConfig::Toast);
+        assert_eq!(config.ui.island.bell, "🔔");
+        let island = toml::from_str::<Config>("[ui.island]\ndisplay = \"numbers\"\n")
+            .unwrap()
+            .ui
+            .island;
+        assert!(island.active_title);
+        assert_eq!(island.arrivals, IslandArrivalsConfig::Toast);
+        assert_eq!(island.bell, "🔔");
     }
 
     #[test]
@@ -1498,6 +1524,19 @@ caps = "square"
     #[test]
     fn island_motion_rejects_unknown_value() {
         assert!(toml::from_str::<Config>("[ui.island]\nmotion = \"unknown\"\n").is_err());
+    }
+
+    #[test]
+    fn island_arrivals_parses_silent_and_rejects_unknown_value() {
+        let config: Config = toml::from_str("[ui.island]\narrivals = \"silent\"\n").unwrap();
+        assert_eq!(config.ui.island.arrivals, IslandArrivalsConfig::Silent);
+        assert!(toml::from_str::<Config>("[ui.island]\narrivals = \"unknown\"\n").is_err());
+    }
+
+    #[test]
+    fn island_bell_parses_string_override() {
+        let config: Config = toml::from_str("[ui.island]\nbell = \"B\"\n").unwrap();
+        assert_eq!(config.ui.island.bell, "B");
     }
 
     #[test]

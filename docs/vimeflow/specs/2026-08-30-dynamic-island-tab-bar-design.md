@@ -496,15 +496,16 @@ replacement.
 
 | herdr signal | reason | gate |
 | --- | --- | --- |
-| `AgentState` Working → Idle/Done, stable for 750ms | `turn-complete` | background target only |
+| herdr's **canonical completion predicate** (amended 2026-09-04: the recognition herdr's own notifications already use — Working\|Blocked → Idle, and same-agent Unknown → Idle; there is no `Done` state in the current model, and the predicate's own settlement replaces the earlier bespoke 750ms debounce) | `turn-complete` | background target only |
 | `AgentState` → Blocked | `blocked` | background target only, immediate |
 | watcher lifecycle error state | `agent-error` | M2b stretch — only if the watcher exposes it |
 | BEL / notify callback | `terminal-attention` | M2b stretch — only if wired |
 
 Background target = the pane is not the focused pane, or its workspace is
 not active — the original's rule mapped onto herdr identity. Producers
-hook where agent state transitions are already applied in the app layer
-(the same place `state_change_seq` advances), so no new event plumbing.
+hook **the exact site where herdr already recognizes these transitions
+for its existing notifications** — collect what herdr collects, one
+predicate, no parallel recognition path and no new event plumbing.
 
 ### Stage machine
 
@@ -533,7 +534,12 @@ panel therefore follows the context-menu pattern exactly: `island_panel_open`
 is checked at the same priority tier as the context-menu state in both key
 and mouse dispatch (before pane input), Esc and outside-click close it
 there, and rendering joins the overlay pass beside `render_context_menu`
-(`src/ui.rs:434` area). No new `Mode` variant.
+(`src/ui.rs:434` area). No new `Mode` variant — with one consequence
+handled explicitly (amended 2026-09-04): `Mode::wants_ascii_input()`
+keeps context-menu commands ASCII-capable, which a bool-only panel would
+miss, so the input-source decision becomes state-aware — the same
+computation also consults `island_panel_open`, keeping `r`/`c`/arrow
+handling ASCII while the panel is open.
 
 **Geometry:** rendered with the `menus.rs` `Clear` + `List` overlay
 pattern, anchored at the capsule's x-center, opening **toward the panes**
@@ -569,10 +575,47 @@ from the next transition.
 
 ### Bell
 
-`!` + unread count (`9+` cap), fg `overlay0` quiet → `accent` unread →
-error tint only if an unread `agent-error` exists (stretch).
+**`🔔`** + unread count (`9+` cap), fg `overlay0` quiet → `accent`
+unread → error tint only if an unread `agent-error` exists (stretch).
+The emoji bell as default (amended 2026-09-05, operator decision after
+the first live look at the `!` placeholder) is the second deliberate
+exception to the ASCII-first rule, on the round-caps rationale: system
+emoji fallback fonts render `🔔` near-universally, no Nerd Font needed,
+and the escape hatch is one key — `bell = "!"` restores the ASCII form.
 `island.bell` override: width-gated 1–2 cells, the `compact_rail_marks`
-validation pattern verbatim.
+validation pattern verbatim; invalid overrides still fall back to the
+safe ASCII `!`.
+
+**First-class item treatment** (amended 2026-09-05, operator decision
+after the live look): the bell region is spaced and dressed like every
+other island item, not glued bare at the edge — separated from the last
+marker by the standard `MARKER_GAP`, and under round caps wearing the
+same mini-stadium as the compact inactive items (cap + `🔔N` + cap on
+the muted token bg, the unread/read tint carried by the glyph+count fg),
+its trailing cap nesting flush against the capsule cap per the
+conditional-padding rule; square caps render bare `🔔N` with the same
+gap. The reserve add-on and `page_plan` fixed term include the gap and
+stadium caps.
+
+**Stable-capsule interaction** (amended 2026-09-04, written after the
+stable capsule landed in PR #14): the bell region's width joins the
+reserved capsule width as a flat, active-independent add-on whenever the
+bell is visible — candidates don't vary by it, so the switch-stability
+invariant is untouched. The bell **appearing or disappearing is a snap
+event**, exactly like page change / rename / config flip: the reserve
+recomputes, the outer edges move once, and any in-flight tab-switch
+animation clears (the geometry-change rule) — it is a discrete state
+change, never a tween. Record-count changes while the bell stays visible
+change only its 1-cell count digit region within the same reserved slot
+(`9+` caps the width), so ordinary arrivals do not move the frame; the
+one-cell 9→9+ growth is treated as bell-region width change and snaps
+like appearance. When visible, the bell width also joins `page_plan`'s
+active-independent fixed-width term, so page planning never admits more
+markers than the belled capsule can hold on narrow rows. The panel
+anchors at the **current** capsule x-center each render: the capsule
+never tweens, so the panel never slides continuously; a bell-width snap
+while the panel is open re-anchors it in the same frame (a one-cell hop
+under `position = "left"`, invisible under `center`'s symmetric shift).
 
 ### Tests (M2b)
 

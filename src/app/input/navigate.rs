@@ -412,6 +412,7 @@ impl App {
                     leave_navigate_mode(&mut self.state);
                 }
             }
+            NavigateAction::IslandPanelToggle => self.state.toggle_island_panel(),
             NavigateAction::Detach => {
                 super::modal::request_detach(&mut self.state);
                 leave_navigate_mode(&mut self.state);
@@ -809,6 +810,7 @@ impl App {
                     context: err.to_string(),
                     position: None,
                     target: None,
+                    island_record_id: None,
                 });
                 self.sync_toast_deadline(previous_toast);
                 finish_custom_command_context(&mut self.state, context, previous_mode);
@@ -905,6 +907,7 @@ impl App {
                     context: err.to_string(),
                     position: None,
                     target: None,
+                    island_record_id: None,
                 });
                 self.sync_toast_deadline(previous_toast);
             }
@@ -961,6 +964,7 @@ impl App {
                 context: format!("focused pane {public_pane_id}"),
                 position: None,
                 target: None,
+                island_record_id: None,
             });
         }
         Ok(())
@@ -1375,6 +1379,7 @@ pub(crate) enum NavigateAction {
     Settings,
     ReloadConfig,
     OpenNotificationTarget,
+    IslandPanelToggle,
     Detach,
     OpenNavigator,
 }
@@ -1399,6 +1404,7 @@ fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
             | NavigateAction::CyclePanePrevious
             | NavigateAction::LastPane
             | NavigateAction::OpenNotificationTarget
+            | NavigateAction::IslandPanelToggle
     )
 }
 
@@ -1467,7 +1473,7 @@ fn action_for_key(
         .or_else(|| indexed_navigation_action(state, &key, dispatch))
 }
 
-fn non_indexed_action_for_key(
+pub(super) fn non_indexed_action_for_key(
     state: &AppState,
     key: &TerminalKey,
     dispatch: BindingDispatch,
@@ -1517,6 +1523,7 @@ fn non_indexed_action_for_key(
             &kb.open_notification_target,
             NavigateAction::OpenNotificationTarget,
         ),
+        (&kb.island_panel_toggle, NavigateAction::IslandPanelToggle),
         (&kb.detach, NavigateAction::Detach),
         (&kb.goto, NavigateAction::OpenNavigator),
     ] {
@@ -1770,6 +1777,9 @@ pub(super) fn execute_navigate_action_in_context(
                 leave_navigate_mode(state);
             }
         }
+        NavigateAction::IslandPanelToggle => {
+            state.toggle_island_panel();
+        }
         NavigateAction::Detach => {
             super::modal::request_detach(state);
             leave_navigate_mode(state);
@@ -1836,7 +1846,7 @@ fn finish_custom_command_context(
     }
 }
 
-fn leave_command_mode(state: &mut AppState) {
+pub(super) fn leave_command_mode(state: &mut AppState) {
     if state.copy_mode_pane_is_focused() {
         state.mode = Mode::Copy;
     } else if state.active.is_some() {
@@ -2362,6 +2372,7 @@ mod tests {
                 workspace_id: target_workspace_id,
                 pane_id: target_pane,
             }),
+            island_record_id: None,
         });
 
         handle_navigate_key(
@@ -2722,6 +2733,21 @@ last_pane = "prefix+tab"
         );
 
         assert_eq!(action, Some(NavigateAction::SwitchTab(1)));
+    }
+
+    #[test]
+    fn island_panel_default_binding_maps_and_noops_with_an_empty_store() {
+        let mut state = state_with_workspaces(&["one"]);
+        let action = action_for_key(
+            &state,
+            TerminalKey::new(KeyCode::Char('i'), KeyModifiers::empty()),
+            BindingDispatch::Prefix,
+        );
+        assert_eq!(action, Some(NavigateAction::IslandPanelToggle));
+
+        execute_navigate_action(&mut state, NavigateAction::IslandPanelToggle);
+
+        assert!(!state.island_panel_open);
     }
 
     #[test]

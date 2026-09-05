@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use std::path::PathBuf;
 
 use crate::app::{App, Mode};
@@ -183,6 +185,7 @@ impl App {
             height: geometry.height,
         });
         self.state.mode = Mode::Terminal;
+        self.close_island_panel();
         Ok(())
     }
 }
@@ -214,7 +217,7 @@ impl App {
 mod tests {
     use super::*;
 
-    fn app_with_popup() -> App {
+    fn app_with_workspace() -> App {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
             &crate::config::Config::default(),
@@ -226,6 +229,11 @@ mod tests {
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("popup")];
         app.state.active = Some(0);
         app.state.selected = 0;
+        app
+    }
+
+    fn app_with_popup() -> App {
+        let mut app = app_with_workspace();
         let terminal_id = TerminalId::alloc();
         app.state.terminals.insert(
             terminal_id.clone(),
@@ -238,6 +246,76 @@ mod tests {
             height: None,
         });
         app
+    }
+
+    fn app_with_island_record() -> App {
+        let mut app = app_with_workspace();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        app.state
+            .push_island_record(crate::app::state::IslandRecord {
+                id: 0,
+                workspace_id: "w1".into(),
+                tab_id: "w1:t1".into(),
+                pane_id,
+                agent: Some(crate::detect::Agent::Codex),
+                reason: crate::app::state::IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::UNIX_EPOCH,
+                read: false,
+            })
+            .expect("test island record id");
+        crate::ui::compute_view(&mut app.state, ratatui::layout::Rect::new(0, 0, 100, 20));
+        app
+    }
+
+    fn next_prefix_input_source_intent(app: &mut App) -> bool {
+        match app.event_rx.try_recv().expect("prefix input-source intent") {
+            crate::events::AppEvent::PrefixInputSource { active } => active,
+            other => panic!("expected prefix input-source intent, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn opening_popup_closes_island_panel_restores_input_source_and_accepts_input() {
+        let mut app = app_with_island_record();
+        app.state.switch_ascii_input_source_in_prefix = true;
+        app.state.set_island_panel_open(true);
+        app.sync_prefix_input_source();
+        assert!(next_prefix_input_source_intent(&mut app));
+        let (runtime, mut input_rx) = TerminalRuntime::test_with_channel(80, 24);
+
+        app.spawn_popup_command(
+            None,
+            Vec::new(),
+            PopupGeometry::default(),
+            move |_, _, _, _, _, _| Ok((runtime, None)),
+        )
+        .expect("test popup opens");
+
+        assert!(app.state.popup_pane.is_some());
+        assert!(!app.state.island_panel_open);
+        assert!(!next_prefix_input_source_intent(&mut app));
+        app.handle_text_commit_headless("popup input");
+        assert_eq!(
+            input_rx.try_recv().expect("popup input"),
+            bytes::Bytes::from_static(b"popup input")
+        );
+        assert!(app.close_popup_pane());
+    }
+
+    #[tokio::test]
+    async fn island_panel_toggle_waits_for_popup_to_close() {
+        let mut app = app_with_island_record();
+        let (runtime, _input_rx) = TerminalRuntime::test_with_channel(80, 24);
+        app.install_test_popup_runtime(runtime);
+
+        app.state.toggle_island_panel();
+        assert!(!app.state.island_panel_open);
+
+        assert!(app.close_popup_pane());
+        app.state.toggle_island_panel();
+        assert!(app.state.island_panel_open);
     }
 
     #[test]

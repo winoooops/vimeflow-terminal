@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use std::time::{Duration, Instant};
 
 mod agent_view;
@@ -1205,6 +1207,7 @@ impl App {
                         context: body.unwrap_or_default(),
                         position: params.position,
                         target: None,
+                        island_record_id: None,
                     });
                     self.sync_toast_deadline(previous_toast);
                     self.emit_api_notification_sound(requested_sound);
@@ -1704,6 +1707,7 @@ mod tests {
         app.state.mode = Mode::Terminal;
         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         app.state.toast_config.delay_seconds = 0;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Silent;
 
         let (events, _) = tokio::sync::mpsc::channel(4);
         let runtime = crate::terminal::TerminalRuntime::spawn(
@@ -1795,6 +1799,7 @@ mod tests {
         app.state.active = None;
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Silent;
         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         app.state.toast_config.delay_seconds = 1;
 
@@ -2227,6 +2232,7 @@ mod tests {
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
         app.state.toast_config.delivery = crate::config::ToastDelivery::Terminal;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Silent;
 
         app.handle_internal_event(AppEvent::StateChanged {
             pane_id: root,
@@ -2246,6 +2252,7 @@ mod tests {
                 workspace_id,
                 pane_id: root,
             }),
+            island_record_id: None,
         });
 
         app.handle_internal_event(AppEvent::StateChanged {

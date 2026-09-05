@@ -152,6 +152,7 @@ pub struct App {
     /// even when an App-internal drain consumes the event before the forwarding drain.
     pub(crate) local_input_source_switch: bool,
     pub(crate) config_reloaded_from_disk: bool,
+    prefix_input_source_active_sent: bool,
     prefix_input_source: Box<dyn crate::platform::PrefixInputSource>,
 }
 
@@ -625,6 +626,8 @@ impl App {
                 tab_hit_areas: Vec::new(),
                 island_marker_hit_areas: Vec::new(),
                 island_bell_hit_area: Rect::default(),
+                island_panel_hit_area: Rect::default(),
+                island_panel_record_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
                 new_tab_hit_area: Rect::default(),
@@ -648,6 +651,10 @@ impl App {
             config_diagnostic,
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
+            island_records: std::collections::VecDeque::new(),
+            island_panel_open: false,
+            island_panel_list: state::MenuListState::new(0),
+            next_island_record_id: 0,
             copy_feedback: None,
             outer_terminal_focus: None,
             prefix_code,
@@ -693,7 +700,7 @@ impl App {
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             tab_bar_position: config.ui.tab_bar_position,
             tab_bar_style: config.ui.tab_bar_style,
-            island: config.ui.island,
+            island: config.ui.island.clone(),
             island_anim: None,
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
@@ -833,6 +840,7 @@ impl App {
             local_terminal_notifications: true,
             local_input_source_switch: true,
             config_reloaded_from_disk: false,
+            prefix_input_source_active_sent: false,
             prefix_input_source: Box::new(crate::platform::RealPrefixInputSource::default()),
         }
     }
@@ -922,24 +930,37 @@ impl App {
         self.full_redraw_pending = true;
     }
 
-    pub(crate) fn sync_prefix_input_source(&mut self, previous_mode: Mode) {
-        // Emit the input-source intent on entering/leaving the ASCII realm, like `ClipboardWrite`;
-        // the foreground (client, or this app in monolithic mode) applies the switch. Keyed on the
-        // realm so multi-level prefix commands stay ASCII. The switch is flag-gated but the restore
-        // always fires on exit, so a mid-interaction flag toggle can't strand the host on ASCII.
-        let active = match (
-            previous_mode.wants_ascii_input(),
-            self.state.mode.wants_ascii_input(),
-        ) {
-            (false, true) if self.state.switch_ascii_input_source_in_prefix => true,
-            (true, false) => false,
-            _ => return,
-        };
-        if let Err(err) = self
+    pub(crate) fn sync_prefix_input_source(&mut self) {
+        // Compare with the last successfully queued intent so geometry-driven modal closures are
+        // restored even though they do not pass through an input dispatch transition.
+        let active =
+            self.state.wants_ascii_input() && self.state.switch_ascii_input_source_in_prefix;
+        if active == self.prefix_input_source_active_sent {
+            return;
+        }
+        match self
             .event_tx
             .try_send(crate::events::AppEvent::PrefixInputSource { active })
         {
-            tracing::warn!(active, %err, "failed to queue prefix input-source change");
+            Ok(()) => self.prefix_input_source_active_sent = active,
+            Err(err) => tracing::warn!(active, %err, "failed to queue prefix input-source change"),
+        }
+    }
+
+    pub(crate) fn close_island_panel(&mut self) {
+        self.state.set_island_panel_open(false);
+        self.sync_prefix_input_source();
+    }
+
+    /// Reconcile shared panel state only after computing the foreground client's geometry.
+    pub(crate) fn reconcile_island_panel_from_foreground_view(&mut self) {
+        if self.state.island_panel_open
+            && (self.state.view.island_panel_hit_area.width == 0
+                || self.state.view.island_panel_hit_area.height == 0)
+        {
+            self.close_island_panel();
+        } else {
+            self.sync_prefix_input_source();
         }
     }
 
@@ -947,9 +968,8 @@ impl App {
         &mut self,
         event: crate::events::AppEvent,
     ) -> bool {
-        let previous_mode = self.state.mode;
         let changed = self.handle_internal_event_with_render_impact(event);
-        self.sync_prefix_input_source(previous_mode);
+        self.sync_prefix_input_source();
         changed
     }
 
@@ -1133,6 +1153,7 @@ impl App {
                             area,
                         );
                     }
+                    self.reconcile_island_panel_from_foreground_view();
                     crate::ui::render_with_runtime_registry(
                         &self.state,
                         &self.terminal_runtimes,
@@ -1512,7 +1533,10 @@ impl App {
                     self.clear_island_animation();
                 }
                 self.state.tab_bar_style = config.ui.tab_bar_style;
-                self.state.island = config.ui.island;
+                self.state.island = config.ui.island.clone();
+                if self.state.tab_bar_style == crate::config::TabBarStyleConfig::Classic {
+                    self.state.set_island_panel_open(false);
+                }
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 let previous_agents_view = self.state.agents_view;
@@ -1630,6 +1654,7 @@ impl App {
                     context: "using config.toml".to_string(),
                     position: None,
                     target: None,
+                    island_record_id: None,
                 });
             }
         } else {
@@ -1642,6 +1667,7 @@ impl App {
                     context: "with warnings".to_string(),
                     position: None,
                     target: None,
+                    island_record_id: None,
                 });
             }
         }
@@ -1753,7 +1779,6 @@ impl App {
         apply_host_terminal_theme: bool,
     ) {
         for event in events {
-            let previous_mode = self.state.mode;
             match event {
                 crate::raw_input::RawInputEvent::Key(key) => {
                     let lease_key = input::InputLeaseKey::new(source_id, &key);
@@ -1798,7 +1823,10 @@ impl App {
                     self.handle_text_commit_headless(text.as_str());
                 }
                 crate::raw_input::RawInputEvent::Mouse(mouse) => {
-                    if self.state.popup_pane.is_some() || self.state.mouse_capture {
+                    if self.state.popup_pane.is_some()
+                        || self.state.island_panel_open
+                        || self.state.mouse_capture
+                    {
                         self.handle_mouse_event_headless(source_id, mouse);
                     } else {
                         self.state
@@ -1806,10 +1834,9 @@ impl App {
                     }
                 }
                 crate::raw_input::RawInputEvent::Paste(text) => {
-                    if self.try_route_paste_to_popup(&text) {
-                    } else if self.state.mode != Mode::Terminal {
-                        self.paste_into_active_text_input(&text);
-                    } else {
+                    if !self.try_route_paste_to_popup(&text)
+                        && !self.paste_into_active_text_input(&text)
+                    {
                         if let Some(ws_idx) = self.state.active {
                             if let Some(ws) = self.state.workspaces.get(ws_idx) {
                                 if let Some(focused) = ws.focused_pane_id() {
@@ -1850,7 +1877,7 @@ impl App {
                 crate::raw_input::RawInputEvent::HostCellSizeReport { .. } => {}
                 crate::raw_input::RawInputEvent::Unsupported => {}
             }
-            self.sync_prefix_input_source(previous_mode);
+            self.sync_prefix_input_source();
         }
     }
 
@@ -1864,6 +1891,9 @@ impl App {
     /// since the server doesn't have the async context of the monolithic App.
     fn handle_non_terminal_key_headless(&mut self, key: crate::input::TerminalKey) {
         let key_event = key.as_key_event();
+        if self.intercept_island_panel_key(&key) {
+            return;
+        }
         if input::modal_paste_target_active(&self.state)
             && input::is_modal_paste_shortcut(&key_event)
         {
@@ -2075,6 +2105,37 @@ mod tests {
         )
     }
 
+    fn open_test_island_panel(app: &mut App, area: Rect) {
+        let workspace = Workspace::test_new("one");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        app.state.hide_tab_bar_when_single_tab = true;
+        app.state.switch_ascii_input_source_in_prefix = true;
+        app.state
+            .push_island_record(state::IslandRecord {
+                id: 0,
+                workspace_id: "w1".into(),
+                tab_id: "w1:t1".into(),
+                pane_id,
+                agent: Some(Agent::Codex),
+                reason: state::IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::UNIX_EPOCH,
+                read: false,
+            })
+            .expect("test island record id");
+        app.state.set_island_panel_open(true);
+        crate::ui::compute_view_with_runtime_registry(&mut app.state, &app.terminal_runtimes, area);
+        app.reconcile_island_panel_from_foreground_view();
+        assert!(app.state.island_panel_open);
+        assert!(app.state.view.island_panel_hit_area.width > 0);
+        assert_eq!(drained_prefix_active(app), vec![true]);
+    }
+
     fn unique_temp_path(name: &str) -> std::path::PathBuf {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2151,12 +2212,12 @@ mod tests {
 
         // Terminal -> Prefix emits the ASCII-switch intent.
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(Mode::Terminal);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![true]);
 
         // Prefix -> Terminal emits the restore intent.
         app.state.mode = Mode::Terminal;
-        app.sync_prefix_input_source(Mode::Prefix);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2167,13 +2228,61 @@ mod tests {
 
         // Entering the realm with the flag off emits nothing.
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(Mode::Terminal);
+        app.sync_prefix_input_source();
         assert!(drained_prefix_active(&mut app).is_empty());
 
-        // Leaving the realm still emits the restore (harmless if nothing was switched), so a
-        // mid-interaction flag toggle can't strand the host on ASCII.
+        // Leaving also emits nothing because no active intent was sent.
         app.state.mode = Mode::Terminal;
-        app.sync_prefix_input_source(Mode::Prefix);
+        app.sync_prefix_input_source();
+        assert!(drained_prefix_active(&mut app).is_empty());
+    }
+
+    #[test]
+    fn sync_prefix_input_source_restores_after_silent_panel_closure() {
+        let mut app = test_app();
+        app.state.switch_ascii_input_source_in_prefix = true;
+        app.state.island_panel_open = true;
+        app.sync_prefix_input_source();
+        assert_eq!(drained_prefix_active(&mut app), vec![true]);
+
+        app.state.island_panel_open = false;
+        app.sync_prefix_input_source();
+        assert_eq!(drained_prefix_active(&mut app), vec![false]);
+    }
+
+    #[test]
+    fn foreground_mobile_geometry_closes_panel_and_restores_input_source() {
+        let mut app = test_app();
+        open_test_island_panel(&mut app, Rect::new(0, 0, 100, 20));
+
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &app.terminal_runtimes,
+            Rect::new(0, 0, 44, 20),
+        );
+        app.reconcile_island_panel_from_foreground_view();
+
+        assert_eq!(app.state.view.layout, state::ViewLayout::Mobile);
+        assert!(!app.state.island_panel_open);
+        assert!(!app.state.wants_ascii_input());
+        assert_eq!(drained_prefix_active(&mut app), vec![false]);
+    }
+
+    #[test]
+    fn foreground_short_desktop_closes_panel_and_restores_input_source() {
+        let mut app = test_app();
+        open_test_island_panel(&mut app, Rect::new(0, 0, 100, 20));
+
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &app.terminal_runtimes,
+            Rect::new(0, 0, 100, 3),
+        );
+        app.reconcile_island_panel_from_foreground_view();
+
+        assert_eq!(app.state.view.layout, state::ViewLayout::Desktop);
+        assert!(!app.state.island_panel_open);
+        assert!(!app.state.wants_ascii_input());
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2212,20 +2321,31 @@ mod tests {
     }
 
     #[test]
+    fn open_island_panel_makes_the_input_source_decision_ascii_capable() {
+        let mut app = test_app();
+        app.state.mode = Mode::Terminal;
+        assert!(!app.state.wants_ascii_input());
+
+        app.state.island_panel_open = true;
+
+        assert!(app.state.wants_ascii_input());
+    }
+
+    #[test]
     fn sync_prefix_input_source_keeps_realm_across_multi_level_prefix_commands() {
         let mut app = test_app();
         app.state.switch_ascii_input_source_in_prefix = true;
 
         // Terminal -> Prefix switches once.
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(Mode::Terminal);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![true]);
 
         // Prefix -> sub-mode and sub-mode -> sub-mode stay in the realm: no emit.
         app.state.mode = Mode::Navigator;
-        app.sync_prefix_input_source(Mode::Prefix);
+        app.sync_prefix_input_source();
         app.state.mode = Mode::Resize;
-        app.sync_prefix_input_source(Mode::Navigator);
+        app.sync_prefix_input_source();
         assert!(
             drained_prefix_active(&mut app).is_empty(),
             "must not switch or restore while still in the realm"
@@ -2233,7 +2353,7 @@ mod tests {
 
         // Leaving the realm back to the terminal restores.
         app.state.mode = Mode::Terminal;
-        app.sync_prefix_input_source(Mode::Resize);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2243,12 +2363,12 @@ mod tests {
         app.state.switch_ascii_input_source_in_prefix = true;
 
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(Mode::Terminal);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![true]);
 
         // Prefix -> RenameTab leaves the realm (text entry wants the IME): restore.
         app.state.mode = Mode::RenameTab;
-        app.sync_prefix_input_source(Mode::Prefix);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2433,6 +2553,7 @@ mod tests {
             context: "background · 2".to_string(),
             position: None,
             target: None,
+            island_record_id: None,
         });
         let original_toast = app.state.toast.clone();
 
@@ -2519,6 +2640,53 @@ mod tests {
     }
 
     #[test]
+    fn delayed_herdr_island_arrival_keeps_toast_identity_and_lifetime() {
+        let mut app = test_app();
+        let background = Workspace::test_new("background");
+        let pane_id = background.tabs[0].root_pane;
+        app.state.workspaces = vec![background, Workspace::test_new("foreground")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(1);
+        app.state.selected = 1;
+        app.state.mode = Mode::Terminal;
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Toast;
+        app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
+        app.state.toast_config.delay_seconds = 1;
+        app.state.sound.enabled = false;
+
+        app.handle_internal_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Pi),
+            state: AgentState::Blocked,
+            visible_blocker: false,
+            visible_working: false,
+            process_exited: false,
+            observed_at: Instant::now(),
+        });
+        let arrival_toast = app
+            .state
+            .toast
+            .clone()
+            .expect("immediate island arrival toast");
+        let toast_deadline = app.toast_deadline.expect("island toast deadline");
+        let notification_deadline = app
+            .state
+            .next_pending_agent_notification_deadline()
+            .expect("pending notification deadline");
+        assert!(notification_deadline < toast_deadline);
+        app.next_resize_poll = toast_deadline + Duration::from_secs(1);
+
+        assert!(app.handle_scheduled_tasks(notification_deadline, false));
+        assert_eq!(app.state.toast, Some(arrival_toast));
+        assert_eq!(app.toast_deadline, Some(toast_deadline));
+
+        assert!(app.handle_scheduled_tasks(toast_deadline, false));
+        assert!(app.state.toast.is_none());
+        assert!(app.toast_deadline.is_none());
+    }
+
+    #[test]
     fn notification_show_api_respects_off_delivery() {
         let mut app = test_app();
         app.state.toast_config.delivery = crate::config::ToastDelivery::Off;
@@ -2557,6 +2725,7 @@ mod tests {
             context: "background · 2".to_string(),
             position: None,
             target: None,
+            island_record_id: None,
         });
 
         let response =
@@ -3241,11 +3410,19 @@ mod tests {
             app.state.island.motion,
             crate::config::IslandMotionConfig::Smooth
         );
+        assert_eq!(
+            app.state.island.arrivals,
+            crate::config::IslandArrivalsConfig::Toast
+        );
+        assert_eq!(app.state.island.bell, "🔔");
 
         config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         config.ui.island.position = crate::config::IslandPositionConfig::Left;
         config.ui.island.display = crate::config::IslandDisplayConfig::Labels;
         config.ui.island.motion = crate::config::IslandMotionConfig::Off;
+        config.ui.island.arrivals = crate::config::IslandArrivalsConfig::Silent;
+        config.ui.island.bell = "B".to_string();
+        app.state.island_panel_open = true;
         app.apply_live_config(&config, &[], &[], false);
         assert_eq!(
             app.state.tab_bar_style,
@@ -3263,11 +3440,19 @@ mod tests {
             app.state.island.motion,
             crate::config::IslandMotionConfig::Off
         );
+        assert_eq!(
+            app.state.island.arrivals,
+            crate::config::IslandArrivalsConfig::Silent
+        );
+        assert_eq!(app.state.island.bell, "B");
+        assert!(!app.state.island_panel_open);
 
         config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Island;
         config.ui.island.position = crate::config::IslandPositionConfig::Center;
         config.ui.island.display = crate::config::IslandDisplayConfig::Dots;
         config.ui.island.motion = crate::config::IslandMotionConfig::Steps;
+        config.ui.island.arrivals = crate::config::IslandArrivalsConfig::Toast;
+        config.ui.island.bell = "!".to_string();
         app.apply_live_config(&config, &[], &[], false);
         assert_eq!(
             app.state.tab_bar_style,
@@ -3285,6 +3470,11 @@ mod tests {
             app.state.island.motion,
             crate::config::IslandMotionConfig::Steps
         );
+        assert_eq!(
+            app.state.island.arrivals,
+            crate::config::IslandArrivalsConfig::Toast
+        );
+        assert_eq!(app.state.island.bell, "!");
     }
 
     fn test_island_anim() -> state::IslandAnim {
