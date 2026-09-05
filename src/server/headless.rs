@@ -308,6 +308,8 @@ pub struct HeadlessServer {
     next_client_id: u64,
     /// The client currently driving the shared pane runtime size, theme, and input keybindings.
     foreground_client_id: Option<u64>,
+    /// The foreground client that currently owns the ASCII input-source switch.
+    prefix_input_source_client_id: Option<u64>,
     /// Server-owned keybindings, restored when foreground clients use server mode.
     server_keybindings: crate::config::LiveKeybindConfig,
     /// Full server config warning shown to clients that use server keybindings.
@@ -539,6 +541,7 @@ impl HeadlessServer {
             #[cfg(unix)]
             next_client_id: 1,
             foreground_client_id: None,
+            prefix_input_source_client_id: None,
             server_keybindings,
             server_config_diagnostic,
             server_config_diagnostic_without_keybindings,
@@ -1065,6 +1068,7 @@ impl HeadlessServer {
             },
             true,
         );
+        self.sync_desired_prefix_input_source();
         match response_rx.recv_timeout(Duration::from_secs(5)) {
             Ok(response) => serde_json::from_str::<api::schema::ErrorResponse>(&response)
                 .map(|response| Err(response.error))
@@ -1152,6 +1156,24 @@ impl HeadlessServer {
             // and label pagination reflow), so snap the animation here at the
             // single choke point instead of per event.
             self.app.clear_island_animation();
+        }
+        self.sync_desired_prefix_input_source();
+    }
+
+    fn sync_desired_prefix_input_source(&mut self) {
+        let active = self.app.state.switch_ascii_input_source_in_prefix
+            && self.app.state.wants_ascii_input();
+        let target = active.then_some(self.foreground_client_id).flatten();
+        if self.prefix_input_source_client_id == target {
+            return;
+        }
+        if let Some(previous) = self.prefix_input_source_client_id.take() {
+            self.send_to_client(previous, ServerMessage::PrefixInputSource { active: false });
+        }
+        if let Some(client_id) = target {
+            if self.send_to_client(client_id, ServerMessage::PrefixInputSource { active: true }) {
+                self.prefix_input_source_client_id = Some(client_id);
+            }
         }
     }
 
@@ -2170,7 +2192,7 @@ impl HeadlessServer {
     ///
     /// Returns true if the event changed visual state (requiring a re-render).
     fn handle_internal_event_with_forwarding(&mut self, ev: AppEvent) -> bool {
-        match &ev {
+        let changed = match &ev {
             #[cfg(unix)]
             AppEvent::TitleSyncResolved { .. } => {
                 let AppEvent::TitleSyncResolved { generation, panes } = ev else {
@@ -2190,14 +2212,7 @@ impl HeadlessServer {
                 }
                 true
             }
-            AppEvent::PrefixInputSource { active } => {
-                // Input-source switching is a client-local host side effect; forward it to the
-                // foreground client (which owns the real TIS switch + run-loop pump), like clipboard.
-                self.send_to_foreground_client(ServerMessage::PrefixInputSource {
-                    active: *active,
-                });
-                true
-            }
+            AppEvent::PrefixInputSource { .. } => true,
             AppEvent::StateChanged { pane_id, agent, .. } => {
                 // Capture toast before handling.
                 let toast_before = self.app.state.toast.clone();
@@ -2256,7 +2271,9 @@ impl HeadlessServer {
                 let toast_msg = if self.app.state.toast_config.delay_seconds == 0
                     && should_forward_toast_to_clients(self.app.state.toast_config.delivery)
                 {
-                    if self.app.state.toast.is_some() && self.app.state.toast != toast_before {
+                    if self.app.state.toast.as_ref().is_some_and(|toast| {
+                        toast.island_record_id.is_none() && self.app.state.toast != toast_before
+                    }) {
                         self.app
                             .state
                             .toast
@@ -2348,7 +2365,9 @@ impl HeadlessServer {
                 let toast_msg = if self.app.state.toast_config.delay_seconds == 0
                     && should_forward_toast_to_clients(self.app.state.toast_config.delivery)
                 {
-                    if self.app.state.toast.is_some() && self.app.state.toast != toast_before {
+                    if self.app.state.toast.as_ref().is_some_and(|toast| {
+                        toast.island_record_id.is_none() && self.app.state.toast != toast_before
+                    }) {
                         self.app
                             .state
                             .toast
@@ -2449,7 +2468,9 @@ impl HeadlessServer {
                 true
             }
             _ => self.app.handle_internal_event_with_render_impact(ev),
-        }
+        };
+        self.sync_desired_prefix_input_source();
+        changed
     }
 
     /// Drains internal events, forwarding clipboard, sound, and toast
@@ -3362,7 +3383,9 @@ impl HeadlessServer {
     /// trigger internal events that may set toast state or would normally
     /// play sounds — in headless mode we forward these to clients instead.
     fn handle_api_request_with_shutdown_check(&mut self, msg: api::ApiRequestMessage) -> bool {
-        self.handle_api_request_with_shutdown_check_inner(msg, false)
+        let changed = self.handle_api_request_with_shutdown_check_inner(msg, false);
+        self.sync_desired_prefix_input_source();
+        changed
     }
 
     fn handle_api_request_with_render_impact(
@@ -3375,7 +3398,9 @@ impl HeadlessServer {
         ) {
             return self.handle_pane_graphics_stream_frame(msg);
         }
-        if self.handle_api_request_with_shutdown_check_inner(msg, false) {
+        let changed = self.handle_api_request_with_shutdown_check_inner(msg, false);
+        self.sync_desired_prefix_input_source();
+        if changed {
             RenderImpact::Full
         } else {
             RenderImpact::None
@@ -3607,6 +3632,9 @@ impl HeadlessServer {
             self.app.state.toast_config.delivery,
         ) && toast_after.is_some()
             && toast_after != toast_before
+            && toast_after
+                .as_ref()
+                .is_some_and(|toast| toast.island_record_id.is_none())
         {
             if let Some(toast) = &toast_after {
                 debug!(title = %toast.title, body = %toast.context, "forwarding toast notification from API request");
@@ -5082,6 +5110,7 @@ mod tests {
             #[cfg(unix)]
             next_client_id: 1,
             foreground_client_id: None,
+            prefix_input_source_client_id: None,
             server_keybindings,
             server_config_diagnostic: None,
             server_config_diagnostic_without_keybindings: None,
@@ -7933,6 +7962,61 @@ next_tab = ""
         )
     }
 
+    fn test_writable_app_client(
+        outer_terminal_focus: Option<bool>,
+        last_activity: u64,
+    ) -> (ClientConnection, std::sync::mpsc::Receiver<Vec<u8>>) {
+        let (writer, control_rx, _render_rx) = test_client_writer();
+        (
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                outer_terminal_focus,
+                last_activity,
+                RenderEncoding::SemanticFrame,
+                Some(writer),
+            ),
+            control_rx,
+        )
+    }
+
+    fn seed_test_island_panel(server: &mut HeadlessServer) -> crate::layout::PaneId {
+        let workspace = crate::workspace::Workspace::test_new("test");
+        let pane_id = workspace.tabs[0].root_pane;
+        let workspace_id = workspace.id.clone();
+        server.app.state.workspaces = vec![workspace];
+        server.app.state.ensure_test_terminals();
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        server.app.state.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        server.app.state.switch_ascii_input_source_in_prefix = true;
+        crate::ui::compute_view_with_runtime_registry(
+            &mut server.app.state,
+            &server.app.terminal_runtimes,
+            Rect::new(0, 0, 100, 24),
+        );
+        server
+            .app
+            .state
+            .push_island_record(crate::app::state::IslandRecord {
+                id: 0,
+                workspace_id: workspace_id.clone(),
+                tab_id: format!("{workspace_id}:t1"),
+                pane_id,
+                agent: Some(crate::detect::Agent::Codex),
+                reason: crate::app::state::IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::UNIX_EPOCH,
+                read: false,
+            })
+            .expect("test island record");
+        server.app.state.set_island_panel_open(true);
+        assert!(server.app.state.island_panel_open);
+        pane_id
+    }
+
     #[test]
     fn foreground_client_focus_event_updates_app_focus_state() {
         let mut server = test_headless_server();
@@ -9811,33 +9895,10 @@ next_tab = ""
     #[test]
     fn prefix_input_source_targets_foreground_client_only() {
         let mut server = test_headless_server();
-        let (background_tx, background_control_rx, _background_rx) = test_client_writer();
-        let (foreground_tx, foreground_control_rx, _foreground_rx) = test_client_writer();
-
-        server.clients.insert(
-            1,
-            ClientConnection::new(
-                (120, 40),
-                crate::kitty_graphics::HostCellSize::default(),
-                crate::terminal_theme::TerminalTheme::default(),
-                None,
-                1,
-                RenderEncoding::SemanticFrame,
-                Some(background_tx),
-            ),
-        );
-        server.clients.insert(
-            2,
-            ClientConnection::new(
-                (80, 24),
-                crate::kitty_graphics::HostCellSize::default(),
-                crate::terminal_theme::TerminalTheme::default(),
-                None,
-                2,
-                RenderEncoding::SemanticFrame,
-                Some(foreground_tx),
-            ),
-        );
+        let (background, background_control_rx) = test_writable_app_client(None, 1);
+        let (foreground, foreground_control_rx) = test_writable_app_client(None, 2);
+        server.clients.insert(1, background);
+        server.clients.insert(2, foreground);
         server.foreground_client_id = Some(2);
         server.sync_foreground_client_state();
         // Drain any setup messages (e.g. mouse-capture sync) before exercising the event.
@@ -9845,6 +9906,8 @@ next_tab = ""
             .recv_timeout(Duration::from_millis(20))
             .is_ok()
         {}
+        server.app.state.switch_ascii_input_source_in_prefix = true;
+        server.app.state.mode = crate::app::Mode::Prefix;
 
         let changed = server
             .handle_internal_event_with_forwarding(AppEvent::PrefixInputSource { active: true });
@@ -9864,6 +9927,134 @@ next_tab = ""
                 .is_err(),
             "background client should not receive prefix input-source changes"
         );
+    }
+
+    #[test]
+    fn prefix_input_source_moves_with_foreground_client() {
+        let mut server = test_headless_server();
+        let (first, first_control_rx) = test_writable_app_client(None, 1);
+        let (second, second_control_rx) = test_writable_app_client(None, 2);
+        server.clients.insert(1, first);
+        server.clients.insert(2, second);
+        server.app.state.switch_ascii_input_source_in_prefix = true;
+        server.app.state.mode = crate::app::Mode::Prefix;
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+        assert!(matches!(
+            read_server_message(
+                first_control_rx
+                    .recv_timeout(Duration::from_millis(100))
+                    .expect("first client activation")
+            ),
+            ServerMessage::PrefixInputSource { active: true }
+        ));
+
+        assert!(server.promote_client_to_foreground(2));
+
+        assert!(matches!(
+            read_server_message(
+                first_control_rx
+                    .recv_timeout(Duration::from_millis(100))
+                    .expect("first client restore")
+            ),
+            ServerMessage::PrefixInputSource { active: false }
+        ));
+        assert!(matches!(
+            read_server_message(
+                second_control_rx
+                    .recv_timeout(Duration::from_millis(100))
+                    .expect("second client activation")
+            ),
+            ServerMessage::PrefixInputSource { active: true }
+        ));
+    }
+
+    #[test]
+    fn pane_exit_restores_foreground_input_source_after_panel_closes() {
+        let mut server = test_headless_server();
+        let pane_id = seed_test_island_panel(&mut server);
+        server
+            .app
+            .state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("survivor"));
+        server.app.state.ensure_test_terminals();
+        server.app.state.active = Some(1);
+        server.app.state.selected = 1;
+
+        let (client, client_control_rx) = test_writable_app_client(None, 1);
+        server.clients.insert(1, client);
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+        assert!(matches!(
+            read_server_message(
+                client_control_rx
+                    .recv_timeout(Duration::from_millis(100))
+                    .expect("panel activation")
+            ),
+            ServerMessage::PrefixInputSource { active: true }
+        ));
+
+        assert!(server.handle_internal_event_with_forwarding(AppEvent::PaneDied { pane_id }));
+
+        assert!(!server.app.state.island_panel_open);
+        assert!(matches!(
+            read_server_message(
+                client_control_rx
+                    .recv_timeout(Duration::from_millis(100))
+                    .expect("pane-exit restore")
+            ),
+            ServerMessage::PrefixInputSource { active: false }
+        ));
+    }
+
+    #[test]
+    fn config_reload_restores_foreground_input_source_after_panel_closes() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-headless-input-source-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            "onboarding = false\n[ui]\ntab_bar_style = \"classic\"\n[experimental]\nswitch_ascii_input_source_in_prefix = true\n",
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut server = test_headless_server();
+        seed_test_island_panel(&mut server);
+        let (client, client_control_rx) = test_writable_app_client(None, 1);
+        server.clients.insert(1, client);
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+        assert!(matches!(
+            read_server_message(
+                client_control_rx
+                    .recv_timeout(Duration::from_millis(100))
+                    .expect("panel activation")
+            ),
+            ServerMessage::PrefixInputSource { active: true }
+        ));
+
+        let report = server.reload_server_config(false);
+
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(!server.app.state.island_panel_open);
+        assert!(matches!(
+            read_server_message(
+                client_control_rx
+                    .recv_timeout(Duration::from_millis(100))
+                    .expect("config-reload restore")
+            ),
+            ServerMessage::PrefixInputSource { active: false }
+        ));
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -10454,6 +10645,106 @@ next_tab = ""
             }
             other => panic!("expected api sound, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn zero_delay_island_arrival_forwards_stock_system_notification_for_inactive_target() {
+        let mut server = test_headless_server();
+        let background = crate::workspace::Workspace::test_new("background");
+        let pane_id = background.tabs[0].root_pane;
+        let foreground = crate::workspace::Workspace::test_new("foreground");
+        server.app.state.workspaces = vec![background, foreground];
+        server.app.state.ensure_test_terminals();
+        server.app.state.active = Some(1);
+        server.app.state.selected = 1;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        server.app.state.toast_config.delivery = crate::config::ToastDelivery::System;
+        server.app.state.toast_config.delay_seconds = 0;
+        server.app.state.sound.enabled = false;
+
+        let (client, client_control_rx) = test_writable_app_client(Some(true), 1);
+        server.clients.insert(1, client);
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+
+        assert!(
+            server.handle_internal_event_with_forwarding(AppEvent::StateChanged {
+                pane_id,
+                agent: Some(crate::detect::Agent::Pi),
+                state: crate::detect::AgentState::Blocked,
+                visible_blocker: false,
+                visible_working: false,
+                process_exited: false,
+                observed_at: Instant::now(),
+            })
+        );
+        assert!(server
+            .app
+            .state
+            .toast
+            .as_ref()
+            .is_some_and(|toast| toast.island_record_id.is_some()));
+        match read_server_message(
+            client_control_rx
+                .recv_timeout(Duration::from_millis(100))
+                .expect("stock system notification"),
+        ) {
+            ServerMessage::Notify {
+                kind,
+                message,
+                body,
+            } => {
+                assert_eq!(kind, protocol::NotifyKind::SystemToast);
+                assert_eq!(message, "pi needs attention");
+                assert_eq!(body.as_deref(), Some("background · 1"));
+            }
+            other => panic!("expected stock system notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn zero_delay_island_arrival_does_not_bypass_active_tab_system_suppression() {
+        let mut server = test_headless_server();
+        let mut workspace = crate::workspace::Workspace::test_new("active");
+        let pane_id = workspace.tabs[0].root_pane;
+        workspace.test_split(ratatui::layout::Direction::Horizontal);
+        server.app.state.workspaces = vec![workspace];
+        server.app.state.ensure_test_terminals();
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        server.app.state.toast_config.delivery = crate::config::ToastDelivery::System;
+        server.app.state.toast_config.delay_seconds = 0;
+        server.app.state.sound.enabled = false;
+
+        let (client, client_control_rx) = test_writable_app_client(Some(true), 1);
+        server.clients.insert(1, client);
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+
+        assert!(
+            server.handle_internal_event_with_forwarding(AppEvent::StateChanged {
+                pane_id,
+                agent: Some(crate::detect::Agent::Pi),
+                state: crate::detect::AgentState::Blocked,
+                visible_blocker: false,
+                visible_working: false,
+                process_exited: false,
+                observed_at: Instant::now(),
+            })
+        );
+        assert!(server
+            .app
+            .state
+            .toast
+            .as_ref()
+            .is_some_and(|toast| toast.island_record_id.is_some()));
+        assert!(
+            client_control_rx
+                .recv_timeout(Duration::from_millis(50))
+                .is_err(),
+            "island-owned toast must not escape active-tab suppression"
+        );
     }
 
     #[test]

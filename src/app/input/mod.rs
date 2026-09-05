@@ -66,6 +66,10 @@ use self::{
         modal_action_from_key, ModalAction, ONBOARDING_WELCOME_ACTIONS, RELEASE_NOTES_ACTIONS,
     },
     mouse::MouseAction,
+    navigate::{
+        leave_command_mode, non_indexed_action_for_key, ActionContext, BindingDispatch,
+        NavigateAction,
+    },
     settings::SettingsAction,
 };
 use super::state::{AppState, Mode};
@@ -80,19 +84,20 @@ impl App {
         if !self.state.island_panel_open {
             return false;
         }
-        let toggle = &self.state.keybinds.island_panel_toggle;
-        if (self.state.mode == Mode::Prefix && toggle.matches_prefix_key(key))
-            || (self.state.mode != Mode::Prefix && toggle.matches_direct_key(key))
+        let (dispatch, context) = match self.state.mode {
+            Mode::Prefix => (BindingDispatch::Prefix, ActionContext::Prefix),
+            Mode::Navigate => (BindingDispatch::Prefix, ActionContext::Navigate),
+            _ => (BindingDispatch::Direct, ActionContext::Direct),
+        };
+        if non_indexed_action_for_key(&self.state, key, dispatch)
+            == Some(NavigateAction::IslandPanelToggle)
         {
-            if self.state.mode == Mode::Prefix {
-                self.state.mode = Mode::Terminal;
-            }
-            self.state.set_island_panel_open(false);
+            self.execute_tui_navigate_action(NavigateAction::IslandPanelToggle, context);
         } else if self.state.mode != Mode::Prefix && self.state.is_prefix_key(key) {
             self.state.mode = Mode::Prefix;
         } else {
             if self.state.mode == Mode::Prefix {
-                self.state.mode = Mode::Terminal;
+                leave_command_mode(&mut self.state);
             }
             handle_island_panel_key(&mut self.state, key.as_key_event());
         }
@@ -976,6 +981,55 @@ mod tests {
         app.route_client_events(vec![crate::raw_input::RawInputEvent::Key(toggle)], false);
         assert!(!app.state.island_panel_open);
         assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn island_panel_toggle_preserves_navigate_mode() {
+        let mut app = test_app();
+        seed_island_record(&mut app);
+        app.state.mode = Mode::Navigate;
+        let toggle = TerminalKey::new(KeyCode::Char('i'), KeyModifiers::empty());
+
+        app.route_client_events(
+            vec![crate::raw_input::RawInputEvent::Key(toggle.clone())],
+            false,
+        );
+        assert!(app.state.island_panel_open);
+        assert_eq!(app.state.mode, Mode::Navigate);
+
+        app.route_client_events(vec![crate::raw_input::RawInputEvent::Key(toggle)], false);
+        assert!(!app.state.island_panel_open);
+        assert_eq!(app.state.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn island_panel_prefix_toggle_preserves_copy_mode() {
+        let mut app = test_app();
+        seed_island_record(&mut app);
+        app.state.enter_copy_mode(&app.terminal_runtimes);
+        let prefix = TerminalKey::new(app.state.prefix_code, app.state.prefix_mods);
+        let toggle = TerminalKey::new(KeyCode::Char('i'), KeyModifiers::empty());
+
+        app.route_client_events(
+            vec![
+                crate::raw_input::RawInputEvent::Key(prefix.clone()),
+                crate::raw_input::RawInputEvent::Key(toggle.clone()),
+            ],
+            false,
+        );
+        assert!(app.state.island_panel_open);
+        assert_eq!(app.state.mode, Mode::Copy);
+
+        app.route_client_events(
+            vec![
+                crate::raw_input::RawInputEvent::Key(prefix),
+                crate::raw_input::RawInputEvent::Key(toggle),
+            ],
+            false,
+        );
+        assert!(!app.state.island_panel_open);
+        assert_eq!(app.state.mode, Mode::Copy);
+        assert!(app.state.copy_mode.is_some());
     }
 
     #[tokio::test]

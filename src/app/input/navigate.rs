@@ -1404,6 +1404,7 @@ fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
             | NavigateAction::CyclePanePrevious
             | NavigateAction::LastPane
             | NavigateAction::OpenNotificationTarget
+            | NavigateAction::IslandPanelToggle
     )
 }
 
@@ -1472,7 +1473,7 @@ fn action_for_key(
         .or_else(|| indexed_navigation_action(state, &key, dispatch))
 }
 
-fn non_indexed_action_for_key(
+pub(super) fn non_indexed_action_for_key(
     state: &AppState,
     key: &TerminalKey,
     dispatch: BindingDispatch,
@@ -1845,7 +1846,7 @@ fn finish_custom_command_context(
     }
 }
 
-fn leave_command_mode(state: &mut AppState) {
+pub(super) fn leave_command_mode(state: &mut AppState) {
     if state.copy_mode_pane_is_focused() {
         state.mode = Mode::Copy;
     } else if state.active.is_some() {
