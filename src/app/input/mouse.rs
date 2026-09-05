@@ -113,6 +113,13 @@ impl AppState {
             return self.handle_island_panel_mouse(mouse);
         }
 
+        if rect_contains(self.view.island_bell_hit_area, mouse.column, mouse.row)
+            && matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left))
+        {
+            self.toggle_island_panel();
+            return None;
+        }
+
         if self.mode == Mode::Terminal
             && self.clickable_toast_at(mouse.column, mouse.row)
             && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -506,7 +513,6 @@ impl AppState {
                     return None;
                 }
                 if rect_contains(self.view.island_bell_hit_area, mouse.column, mouse.row) {
-                    self.toggle_island_panel();
                     return None;
                 }
                 if let (Some(ws_idx), Some(tab_idx)) =
@@ -1520,7 +1526,7 @@ impl AppState {
             {
                 self.island_panel_list.move_next(self.island_records.len());
             }
-            MouseEventKind::Down(MouseButton::Left) => {
+            MouseEventKind::Up(MouseButton::Left) => {
                 if rect_contains(self.view.island_bell_hit_area, mouse.column, mouse.row) {
                     self.set_island_panel_open(false);
                 } else if let Some(record_id) = record_at() {
@@ -1529,7 +1535,7 @@ impl AppState {
                     self.set_island_panel_open(false);
                 }
             }
-            MouseEventKind::Down(_) => self.set_island_panel_open(false),
+            MouseEventKind::Up(_) => self.set_island_panel_open(false),
             _ => {}
         }
         None
@@ -3596,12 +3602,15 @@ mod tests {
             bell.x,
             bell.y,
         ));
+        assert!(!app.state.island_panel_open);
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), bell.x, bell.y));
         assert!(app.state.island_panel_open);
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
         let row = app.state.view.island_panel_record_hit_areas[0].1;
         assert!(row.width > 0);
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), row.x, row.y));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), row.x, row.y));
         assert!(app.state.island_records[0].read);
         assert!(app.state.island_panel_open);
 
@@ -3610,16 +3619,29 @@ mod tests {
             bell.x,
             bell.y,
         ));
+        assert!(app.state.island_panel_open);
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), bell.x, bell.y));
         assert!(!app.state.island_panel_open);
     }
 
-    #[test]
-    fn island_panel_outside_click_closes_before_pane_input() {
+    #[tokio::test]
+    async fn island_panel_outside_click_closes_before_pane_input() {
         let mut app = app_for_mouse_test();
-        let ws = Workspace::test_new("one");
+        let mut ws = Workspace::test_new("one");
         let pane_id = ws.tabs[0].root_pane;
         let workspace_id = ws.id.clone();
         let tab_id = crate::workspace::public_tab_id_for_number(&workspace_id, 1);
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"\x1b[?1000h\x1b[?1006h",
+                2,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
         app.state.workspaces = vec![ws];
         app.state.active = Some(0);
         app.state.mode = Mode::Terminal;
@@ -3640,15 +3662,17 @@ mod tests {
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
         let panel = app.state.view.island_panel_hit_area;
         assert!(panel.width > 0);
+        let column = info.inner_rect.x;
+        let row = info.inner_rect.y;
+        assert!(!rect_contains(panel, column, row));
 
-        app.handle_mouse(mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            panel.right(),
-            panel.bottom(),
-        ));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), column, row));
+        assert!(app.state.island_panel_open);
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), column, row));
 
         assert!(!app.state.island_panel_open);
         assert!(app.state.selection.is_none());
+        assert!(input_rx.try_recv().is_err());
     }
 
     #[test]

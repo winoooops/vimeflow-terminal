@@ -250,46 +250,43 @@ impl App {
                 true
             }
             Mode::OpenExistingWorktree => {
-                if !self
+                if self
                     .state
                     .worktree_open
                     .as_ref()
                     .is_some_and(|open| open.search_focused)
                 {
-                    return false;
+                    self.insert_worktree_open_search_text(text);
                 }
-                self.insert_worktree_open_search_text(text);
                 true
             }
             Mode::Navigator => {
-                if !self.state.navigator.search_focused {
-                    return false;
+                if self.state.navigator.search_focused {
+                    insert_navigator_search_text(&mut self.state, &self.terminal_runtimes, text);
                 }
-                insert_navigator_search_text(&mut self.state, &self.terminal_runtimes, text);
                 true
             }
             Mode::KeybindHelp => {
-                if !self.state.keybind_help.search_focused {
-                    return false;
+                if self.state.keybind_help.search_focused {
+                    insert_keybind_help_query_text(&mut self.state, text);
                 }
-                insert_keybind_help_query_text(&mut self.state, text);
                 true
             }
             Mode::Copy => {
-                let Some(prompt) = self
+                if let Some(prompt) = self
                     .state
                     .copy_mode
                     .as_mut()
                     .and_then(|copy_mode| copy_mode.search.prompt.as_mut())
-                else {
-                    return false;
-                };
-                prompt
-                    .query
-                    .extend(text.chars().filter(|ch| !ch.is_control()));
+                {
+                    prompt
+                        .query
+                        .extend(text.chars().filter(|ch| !ch.is_control()));
+                }
                 true
             }
-            _ => false,
+            Mode::Terminal => false,
+            _ => true,
         }
     }
 
@@ -1084,9 +1081,16 @@ mod tests {
     #[tokio::test]
     async fn paste_routes_to_keybind_help_query_only_when_searching() {
         let mut app = test_app();
+        let workspace = crate::workspace::Workspace::test_new("test");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        let (runtime, mut input_rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.state.insert_test_runtime(pane_id, runtime);
         app.state.mode = Mode::KeybindHelp;
         app.handle_paste("ignored".into()).await;
         assert!(app.state.keybind_help.query.is_empty());
+        assert!(input_rx.try_recv().is_err());
 
         app.state.keybind_help.search_focused = true;
         app.state.keybind_help.scroll = 3;
@@ -1094,6 +1098,7 @@ mod tests {
 
         assert_eq!(app.state.keybind_help.query, "workspace");
         assert_eq!(app.state.keybind_help.scroll, 0);
+        assert!(input_rx.try_recv().is_err());
     }
 
     #[tokio::test]
