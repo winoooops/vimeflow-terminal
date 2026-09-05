@@ -226,6 +226,7 @@ fn compute_view_internal(
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
     if is_mobile_width(area, app.mobile_width_threshold) {
+        app.set_island_panel_open(false);
         compute_mobile_view(app, terminal_runtimes, area, resize_panes, cell_size);
         return;
     }
@@ -269,6 +270,9 @@ fn compute_view_internal(
 
     let tab_bar_view = compute_tab_bar_view(app, tab_bar_rect);
     app.tab_scroll = tab_bar_view.scroll;
+    if tab_bar_view.island_bell_hit_area.width == 0 {
+        app.set_island_panel_open(false);
+    }
     let island_panel_view =
         compute_island_panel_view(app, area, tab_bar_rect, tab_bar_view.island_capsule_rect);
 
@@ -819,6 +823,42 @@ mod tests {
         assert_eq!(app.view.layout, ViewLayout::Mobile);
         assert_eq!(app.view.mobile_header_rect, Rect::new(0, 0, 80, 2));
         assert_eq!(app.view.terminal_area, Rect::new(0, 2, 80, 18));
+    }
+
+    #[test]
+    fn resize_to_mobile_closes_island_panel_and_prevents_reopen() {
+        let mut app = crate::app::state::AppState::test_new();
+        let workspace = Workspace::test_new("one");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+        app.push_island_record(crate::app::state::IslandRecord {
+            id: 0,
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            pane_id,
+            agent: Some(crate::detect::Agent::Codex),
+            reason: crate::app::state::IslandReason::TurnComplete,
+            text: "codex turn complete".into(),
+            at: std::time::SystemTime::UNIX_EPOCH,
+            read: false,
+        })
+        .expect("test island record id");
+
+        compute_view(&mut app, Rect::new(0, 0, 100, 20));
+        app.set_island_panel_open(true);
+        assert!(app.island_panel_open);
+        assert!(app.wants_ascii_input());
+
+        compute_view(&mut app, Rect::new(0, 0, 44, 20));
+        assert_eq!(app.view.layout, ViewLayout::Mobile);
+        assert!(!app.island_panel_open);
+        assert!(!app.wants_ascii_input());
+
+        app.toggle_island_panel();
+        assert!(!app.island_panel_open);
     }
 
     #[test]

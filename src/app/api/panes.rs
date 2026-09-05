@@ -952,6 +952,21 @@ impl App {
             }
         };
 
+        let target_workspace_id = self.public_workspace_id(target_ws_idx);
+        let Some(target_tab_id) = self.public_tab_id(target_ws_idx, target_tab_idx) else {
+            return encode_error(id, "pane_move_failed", "target tab disappeared");
+        };
+        for record in self
+            .state
+            .island_records
+            .iter_mut()
+            .filter(|record| record.pane_id == source_pane_id)
+        {
+            record.workspace_id.clone_from(&target_workspace_id);
+            record.tab_id.clone_from(&target_tab_id);
+            record.pane_id = moved_pane_id;
+        }
+
         if focus || self.state.active.is_none() {
             self.state
                 .switch_workspace_tab(target_ws_idx, target_tab_idx);
@@ -1880,6 +1895,7 @@ mod tests {
     use super::*;
     use crate::{
         api::schema::{ErrorResponse, SplitDirection, SuccessResponse},
+        app::state::{IslandReason, IslandRecord},
         config::Config,
         detect::{Agent, AgentState},
         workspace::Workspace,
@@ -2217,6 +2233,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn push_test_island_record(app: &mut App, ws_idx: usize, pane_id: PaneId) -> u64 {
+        let tab_idx = app.state.workspaces[ws_idx]
+            .find_tab_index_for_pane(pane_id)
+            .expect("record pane tab");
+        let workspace_id = app.public_workspace_id(ws_idx);
+        let tab_id = app.public_tab_id(ws_idx, tab_idx).expect("record tab id");
+        app.state
+            .push_island_record(IslandRecord {
+                id: 0,
+                workspace_id,
+                tab_id,
+                pane_id,
+                agent: Some(Agent::Codex),
+                reason: IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::UNIX_EPOCH,
+                read: false,
+            })
+            .expect("test island record id")
     }
 
     #[test]
@@ -2561,6 +2598,7 @@ mod tests {
         let source_tab_public = app.public_tab_id(0, 0).unwrap();
         let target_public = app.public_pane_id(0, target).unwrap();
         let target_tab_public = app.public_tab_id(0, target_tab).unwrap();
+        let record_id = push_test_island_record(&mut app, 0, source);
 
         let response = app.handle_pane_move(
             "req".into(),
@@ -2596,6 +2634,29 @@ mod tests {
             app.state.workspaces[0].tabs[0].terminal_id(source),
             Some(&source_terminal)
         );
+        let moved_record_pane = app
+            .parse_pane_id(&move_result.pane.pane_id)
+            .expect("moved record pane id")
+            .1;
+        let record = app
+            .state
+            .island_records
+            .iter()
+            .find(|record| record.id == record_id)
+            .expect("moved pane record");
+        assert_eq!(record.workspace_id, move_result.pane.workspace_id);
+        assert_eq!(record.tab_id, move_result.pane.tab_id);
+        assert_eq!(record.pane_id, moved_record_pane);
+
+        app.state.workspaces[0].tabs[0].layout.focus_pane(target);
+        assert!(app.state.open_island_record(record_id));
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
+        assert!(app
+            .state
+            .island_records
+            .iter()
+            .find(|record| record.id == record_id)
+            .is_some_and(|record| record.read));
     }
 
     #[test]
@@ -2736,6 +2797,7 @@ mod tests {
         let target_workspace_id = app.public_workspace_id(1);
         let target_tab_id = app.public_tab_id(1, 0).unwrap();
         let target_pane_id = app.public_pane_id(1, target).unwrap();
+        let record_id = push_test_island_record(&mut app, 0, source);
 
         let response = app.handle_pane_move(
             "req".into(),
@@ -2778,6 +2840,30 @@ mod tests {
             Err(crate::app::terminal_targets::TerminalTargetError::NotFound { .. })
         ));
         assert!(app.resolve_agent_target(&move_result.pane.pane_id).is_ok());
+        let moved_record_pane = app
+            .parse_pane_id(&move_result.pane.pane_id)
+            .expect("cross-workspace moved record pane id")
+            .1;
+        let record = app
+            .state
+            .island_records
+            .iter()
+            .find(|record| record.id == record_id)
+            .expect("cross-workspace moved pane record");
+        assert_eq!(record.workspace_id, move_result.pane.workspace_id);
+        assert_eq!(record.tab_id, move_result.pane.tab_id);
+        assert_eq!(record.pane_id, moved_record_pane);
+
+        app.state.workspaces[0].tabs[0].layout.focus_pane(target);
+        assert!(app.state.open_island_record(record_id));
+        assert_eq!(app.state.active, Some(0));
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
+        assert!(app
+            .state
+            .island_records
+            .iter()
+            .find(|record| record.id == record_id)
+            .is_some_and(|record| record.read));
     }
 
     #[test]

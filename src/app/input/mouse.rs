@@ -506,7 +506,7 @@ impl AppState {
                     return None;
                 }
                 if rect_contains(self.view.island_bell_hit_area, mouse.column, mouse.row) {
-                    self.set_island_panel_open(!self.island_panel_open);
+                    self.toggle_island_panel();
                     return None;
                 }
                 if let (Some(ws_idx), Some(tab_idx)) =

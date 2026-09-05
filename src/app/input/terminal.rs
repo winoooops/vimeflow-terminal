@@ -54,8 +54,7 @@ impl App {
                 return runtime.try_send_bytes(bytes).is_ok().then_some(target);
             }
         }
-        if self.state.island_panel_open {
-            super::handle_island_panel_key(&mut self.state, key.as_key_event());
+        if self.intercept_island_panel_key(&key) {
             return None;
         }
 

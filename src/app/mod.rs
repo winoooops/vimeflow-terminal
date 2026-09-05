@@ -1875,8 +1875,7 @@ impl App {
     /// since the server doesn't have the async context of the monolithic App.
     fn handle_non_terminal_key_headless(&mut self, key: crate::input::TerminalKey) {
         let key_event = key.as_key_event();
-        if self.state.island_panel_open {
-            input::handle_island_panel_key(&mut self.state, key_event);
+        if self.intercept_island_panel_key(&key) {
             return;
         }
         if input::modal_paste_target_active(&self.state)

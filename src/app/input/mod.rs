@@ -76,6 +76,29 @@ use super::App;
 // ---------------------------------------------------------------------------
 
 impl App {
+    pub(super) fn intercept_island_panel_key(&mut self, key: &TerminalKey) -> bool {
+        if !self.state.island_panel_open {
+            return false;
+        }
+        let toggle = &self.state.keybinds.island_panel_toggle;
+        if (self.state.mode == Mode::Prefix && toggle.matches_prefix_key(key))
+            || (self.state.mode != Mode::Prefix && toggle.matches_direct_key(key))
+        {
+            if self.state.mode == Mode::Prefix {
+                self.state.mode = Mode::Terminal;
+            }
+            self.state.set_island_panel_open(false);
+        } else if self.state.mode != Mode::Prefix && self.state.is_prefix_key(key) {
+            self.state.mode = Mode::Prefix;
+        } else {
+            if self.state.mode == Mode::Prefix {
+                self.state.mode = Mode::Terminal;
+            }
+            handle_island_panel_key(&mut self.state, key.as_key_event());
+        }
+        true
+    }
+
     pub(super) async fn handle_key(
         &mut self,
         key: TerminalKey,
@@ -84,8 +107,7 @@ impl App {
             return self.handle_terminal_key(key).await;
         }
         let key_event = key.as_key_event();
-        if self.state.island_panel_open {
-            handle_island_panel_key(&mut self.state, key_event);
+        if self.intercept_island_panel_key(&key) {
             return None;
         }
         if modal_paste_target_active(&self.state) && is_modal_paste_shortcut(&key_event) {
@@ -908,6 +930,69 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel().1,
             crate::api::EventHub::default(),
         )
+    }
+
+    fn seed_island_record(app: &mut App) {
+        let workspace = crate::workspace::Workspace::test_new("test");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state
+            .push_island_record(crate::app::state::IslandRecord {
+                id: 0,
+                workspace_id: "w1".into(),
+                tab_id: "w1:t1".into(),
+                pane_id,
+                agent: Some(crate::detect::Agent::Codex),
+                reason: crate::app::state::IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::UNIX_EPOCH,
+                read: false,
+            })
+            .expect("test island record id");
+        crate::ui::compute_view(&mut app.state, ratatui::layout::Rect::new(0, 0, 100, 20));
+    }
+
+    #[test]
+    fn island_panel_prefix_toggle_opens_and_closes() {
+        let mut app = test_app();
+        seed_island_record(&mut app);
+        let prefix = TerminalKey::new(app.state.prefix_code, app.state.prefix_mods);
+        let toggle = TerminalKey::new(KeyCode::Char('i'), KeyModifiers::empty());
+
+        app.route_client_events(
+            vec![
+                crate::raw_input::RawInputEvent::Key(prefix.clone()),
+                crate::raw_input::RawInputEvent::Key(toggle.clone()),
+            ],
+            false,
+        );
+        assert!(app.state.island_panel_open);
+
+        app.route_client_events(vec![crate::raw_input::RawInputEvent::Key(prefix)], false);
+        assert_eq!(app.state.mode, Mode::Prefix);
+        app.route_client_events(vec![crate::raw_input::RawInputEvent::Key(toggle)], false);
+        assert!(!app.state.island_panel_open);
+        assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[tokio::test]
+    async fn island_panel_direct_toggle_closes_when_rebound() {
+        let mut app = test_app();
+        seed_island_record(&mut app);
+        app.state.keybinds.island_panel_toggle =
+            crate::config::ActionKeybinds::direct("ctrl+alt+i");
+        let toggle = TerminalKey::new(
+            KeyCode::Char('i'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        );
+
+        app.handle_key(toggle.clone()).await;
+        assert!(app.state.island_panel_open);
+        app.handle_key(toggle).await;
+        assert!(!app.state.island_panel_open);
     }
 
     #[tokio::test]

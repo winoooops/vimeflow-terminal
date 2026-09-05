@@ -412,9 +412,7 @@ impl App {
                     leave_navigate_mode(&mut self.state);
                 }
             }
-            NavigateAction::IslandPanelToggle => self
-                .state
-                .set_island_panel_open(!self.state.island_panel_open),
+            NavigateAction::IslandPanelToggle => self.state.toggle_island_panel(),
             NavigateAction::Detach => {
                 super::modal::request_detach(&mut self.state);
                 leave_navigate_mode(&mut self.state);
@@ -1779,7 +1777,7 @@ pub(super) fn execute_navigate_action_in_context(
             }
         }
         NavigateAction::IslandPanelToggle => {
-            state.set_island_panel_open(!state.island_panel_open);
+            state.toggle_island_panel();
         }
         NavigateAction::Detach => {
             super::modal::request_detach(state);

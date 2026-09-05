@@ -980,8 +980,17 @@ impl AppState {
     pub(crate) fn set_island_panel_open(&mut self, open: bool) {
         self.island_panel_open = open
             && self.tab_bar_style == crate::config::TabBarStyleConfig::Island
+            && self.view.layout == ViewLayout::Desktop
             && !self.island_records.is_empty();
         self.clamp_island_panel_selection();
+    }
+
+    pub(crate) fn toggle_island_panel(&mut self) {
+        if self.island_panel_open {
+            self.set_island_panel_open(false);
+        } else if self.view.island_bell_hit_area.width > 0 {
+            self.set_island_panel_open(true);
+        }
     }
 
     fn clamp_island_panel_selection(&mut self) {
@@ -1011,18 +1020,10 @@ impl AppState {
         let Some(ws_idx) = self
             .workspaces
             .iter()
-            .position(|workspace| workspace.id == record.workspace_id)
+            .position(|workspace| workspace.find_tab_index_for_pane(record.pane_id).is_some())
         else {
             return false;
         };
-        let Some(tab_idx) = self.workspaces[ws_idx].find_tab_index_for_pane(record.pane_id) else {
-            return false;
-        };
-        if public_tab_id_for_index(&self.workspaces[ws_idx], tab_idx).as_deref()
-            != Some(record.tab_id.as_str())
-        {
-            return false;
-        }
 
         let previous_bell_width = self.island_bell_width();
         if let Some(record) = self
@@ -3807,18 +3808,15 @@ mod tests {
     }
 
     #[test]
-    fn opening_island_record_marks_read_and_jumps_to_its_exact_pane() {
+    fn opening_island_record_uses_pane_identity_despite_stale_display_ids() {
         let mut state = app_with_workspaces(&["first", "second"]);
         let tab_idx = state.workspaces[1].test_add_tab(Some("target"));
         let pane_id = state.workspaces[1].tabs[tab_idx].root_pane;
-        let workspace_id = state.workspaces[1].id.clone();
-        let tab_id =
-            public_tab_id_for_index(&state.workspaces[1], tab_idx).expect("target tab public id");
         let record_id = state
             .push_island_record(IslandRecord {
                 id: 0,
-                workspace_id,
-                tab_id,
+                workspace_id: "stale-workspace".into(),
+                tab_id: "stale-tab".into(),
                 pane_id,
                 agent: Some(Agent::Codex),
                 reason: IslandReason::TurnComplete,
