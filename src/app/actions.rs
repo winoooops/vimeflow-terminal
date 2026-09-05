@@ -981,6 +981,7 @@ impl AppState {
         self.island_panel_open = open
             && self.tab_bar_style == crate::config::TabBarStyleConfig::Island
             && self.view.layout == ViewLayout::Desktop
+            && self.popup_pane.is_none()
             && !self.island_records.is_empty();
         self.clamp_island_panel_selection();
     }

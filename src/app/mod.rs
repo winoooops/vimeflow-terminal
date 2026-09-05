@@ -947,15 +947,21 @@ impl App {
         }
     }
 
+    pub(crate) fn close_island_panel(&mut self) {
+        self.state.set_island_panel_open(false);
+        self.sync_prefix_input_source();
+    }
+
     /// Reconcile shared panel state only after computing the foreground client's geometry.
     pub(crate) fn reconcile_island_panel_from_foreground_view(&mut self) {
         if self.state.island_panel_open
             && (self.state.view.island_panel_hit_area.width == 0
                 || self.state.view.island_panel_hit_area.height == 0)
         {
-            self.state.set_island_panel_open(false);
+            self.close_island_panel();
+        } else {
+            self.sync_prefix_input_source();
         }
-        self.sync_prefix_input_source();
     }
 
     pub(crate) fn handle_internal_event_with_prefix_sync(

@@ -43,6 +43,7 @@ Modified upstream files
 - src/app/api/tabs.rs
 - src/app/state.rs
 - src/app/runtime.rs
+- src/app/popup.rs
 - src/api/schema/tests.rs
 - src/config/model.rs
 - src/config/io.rs
