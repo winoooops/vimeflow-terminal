@@ -143,6 +143,7 @@ impl Config {
                 if let Ok(value) = content.parse::<toml::Value>() {
                     diagnostics.extend(agent_rows_config_diagnostic(&value, &config));
                     diagnostics.extend(compact_rail_marks_config_diagnostics(&value));
+                    diagnostics.extend(island_bell_config_diagnostic(&value));
                 }
                 LoadedConfig {
                     config,
@@ -368,6 +369,7 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
     if !invalid_sections.iter().any(|section| section == "ui") {
         diagnostics.extend(agent_rows_config_diagnostic(&value, &config));
         diagnostics.extend(compact_rail_marks_config_diagnostics(&value));
+        diagnostics.extend(island_bell_config_diagnostic(&value));
     }
 
     Ok(LoadedConfig {
@@ -418,6 +420,16 @@ fn compact_rail_marks_config_diagnostics(value: &toml::Value) -> Vec<String> {
             })
         })
         .collect()
+}
+
+fn island_bell_config_diagnostic(value: &toml::Value) -> Option<String> {
+    let bell = value.get("ui")?.get("island")?.get("bell")?.as_str()?;
+    let width = UnicodeWidthStr::width(bell);
+    (!matches!(width, 1 | 2)).then(|| {
+        format!(
+            "ui.island.bell has display width {width}, expected 1 or 2; value is ignored and the built-in ! stays in effect"
+        )
+    })
 }
 
 fn unknown_top_level_sections_from_str(content: &str) -> (Vec<String>, Vec<String>) {
@@ -1072,6 +1084,46 @@ interval_mss = 250
         assert_eq!(
             loaded.diagnostics,
             vec!["ui.sidebar.compact_rail_marks.claude has display width 3, expected 1 or 2; entry is ignored and the built-in mark stays in effect"]
+        );
+        std::env::remove_var(CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn island_bell_reports_invalid_widths_only() {
+        for (bell, expected) in [("", Some(0)), ("!", None), ("界", None), ("ABC", Some(3))] {
+            let loaded = load_live_config_from_str(&format!(
+                "[ui.island]\nbell = {}\n",
+                toml::Value::String(bell.to_string())
+            ))
+            .expect("valid live config");
+            assert_eq!(
+                loaded.diagnostics,
+                expected
+                    .map(|width| format!(
+                        "ui.island.bell has display width {width}, expected 1 or 2; value is ignored and the built-in ! stays in effect"
+                    ))
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn startup_loader_also_reports_invalid_island_bell() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-config-island-bell-{}.toml",
+            std::process::id()
+        ));
+        std::fs::write(&path, "[ui.island]\nbell = \"ABC\"\n").unwrap();
+        std::env::set_var(CONFIG_PATH_ENV_VAR, &path);
+
+        let loaded = Config::load();
+
+        assert_eq!(
+            loaded.diagnostics,
+            vec!["ui.island.bell has display width 3, expected 1 or 2; value is ignored and the built-in ! stays in effect"]
         );
         std::env::remove_var(CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_file(path);

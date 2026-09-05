@@ -263,7 +263,13 @@ Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row belo
 
 The desktop tab row uses a compact tab island by default. `ui.tab_bar_style` defaults to `"island"`; set it to `"classic"` to restore the upstream tab bar. `ui.island.position` defaults to `"center"` and also accepts `"left"`. `ui.island.display` defaults to `"dots"` and also accepts `"numbers"` or `"labels"`.
 
-Labels mode shows every tab's name — the active tab as the accent pill and inactive tabs as text, each name truncated to a 14-cell text budget inside markers of up to 16 cells. In dots and numbers modes, `ui.island.active_title` defaults to `true` and shows the active tab title in the pill (replacing the number in numbers mode); set it to `false` for the untitled pill. `ui.island.caps` defaults to `"round"`; Ghostty, Kitty, and WezTerm render the caps natively, while `"square"` restores the flat fallback. `ui.island.motion` defaults to `"smooth"`; use `"steps"` for whole-cell motion or `"off"` as the reduced-motion escape. All six settings reload live.
+Labels mode shows every tab's name — the active tab as the accent pill and inactive tabs as text, each name truncated to a 14-cell text budget inside markers of up to 16 cells. In dots and numbers modes, `ui.island.active_title` defaults to `true` and shows the active tab title in the pill (replacing the number in numbers mode); set it to `false` for the untitled pill. `ui.island.caps` defaults to `"round"`; Ghostty, Kitty, and WezTerm render the caps natively, while `"square"` restores the flat fallback. `ui.island.motion` defaults to `"smooth"`; use `"steps"` for whole-cell motion or `"off"` as the reduced-motion escape.
+
+Background agent completions and blocked states are retained as island notification records. `ui.island.arrivals` defaults to `"toast"`; set it to `"silent"` to collect records without showing arrival toasts. When records exist, the capsule shows `ui.island.bell` (default `"🔔"`) with the unread count; the emoji default needs no Nerd Font, and `bell = "!"` restores the ASCII form. Overrides must occupy one or two display cells.
+
+Click the bell or press `prefix+i` (`keys.island_panel_toggle`) to open the notification panel. Use the arrow keys and Enter to jump to a record's workspace, tab, and pane; `r` marks all records read, `c` clears them, and Esc closes the panel.
+
+Install any Nerd Font and set it as your terminal font to use a custom icon, then set an override such as `bell = "󰂚"` under `[ui.island]`. All seven `[ui.island]` settings and `ui.tab_bar_style` reload live.
 
 ### Sidebar row layouts
 

@@ -9195,6 +9195,7 @@ next_tab = ""
             context: "background · 2".to_owned(),
             position: None,
             target: None,
+            island_record_id: None,
         });
         server.render_and_stream();
         let initial = read_server_frame(
@@ -10424,7 +10425,25 @@ next_tab = ""
         });
 
         assert!(changed);
-        assert!(server.app.state.toast.is_none());
+        let record_id = server
+            .app
+            .state
+            .island_records
+            .front()
+            .expect("immediate blocked island record")
+            .id;
+        let arrival_toast = server
+            .app
+            .state
+            .toast
+            .as_ref()
+            .expect("immediate blocked island toast");
+        assert_eq!(
+            arrival_toast.kind,
+            crate::app::state::ToastKind::NeedsAttention
+        );
+        assert_eq!(arrival_toast.island_record_id, Some(record_id));
+        assert!(arrival_toast.target.is_none());
         assert!(
             client_control_rx
                 .recv_timeout(Duration::from_millis(50))
@@ -10470,6 +10489,17 @@ next_tab = ""
             other => panic!("expected delayed system toast, got {other:?}"),
         }
         assert!(server.app.state.pending_agent_notifications.is_empty());
+        assert_eq!(server.app.state.island_records.len(), 1);
+        assert_eq!(server.app.state.island_records[0].id, record_id);
+        assert_eq!(
+            server
+                .app
+                .state
+                .toast
+                .as_ref()
+                .and_then(|toast| toast.island_record_id),
+            Some(record_id)
+        );
     }
 
     #[test]

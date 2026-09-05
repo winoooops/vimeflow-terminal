@@ -786,6 +786,8 @@ pub struct ViewState {
     pub tab_hit_areas: Vec<Rect>,
     pub island_marker_hit_areas: Vec<Rect>,
     pub island_bell_hit_area: Rect,
+    pub island_panel_hit_area: Rect,
+    pub island_panel_record_hit_areas: Vec<(u64, Rect)>,
     pub tab_scroll_left_hit_area: Rect,
     pub tab_scroll_right_hit_area: Rect,
     pub new_tab_hit_area: Rect,
@@ -850,6 +852,12 @@ impl Mode {
                 | Mode::GlobalMenu
                 | Mode::KeybindHelp
         )
+    }
+}
+
+impl AppState {
+    pub(crate) fn wants_ascii_input(&self) -> bool {
+        self.mode.wants_ascii_input() || self.island_panel_open
     }
 }
 
@@ -1310,6 +1318,34 @@ pub enum ToastKind {
     UpdateInstalled,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IslandReason {
+    TurnComplete,
+    Blocked,
+}
+
+// The private v1 record keeps detected-agent identity for later reason styling.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IslandRecord {
+    pub(crate) id: u64,
+    pub(crate) workspace_id: String,
+    pub(crate) tab_id: String,
+    pub(crate) pane_id: PaneId,
+    pub(crate) agent: Option<crate::detect::Agent>,
+    pub(crate) reason: IslandReason,
+    pub(crate) text: String,
+    pub(crate) at: std::time::SystemTime,
+    pub(crate) read: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IslandStage {
+    Pill,
+    Badge,
+    Panel,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToastTarget {
     pub workspace_id: String,
@@ -1323,6 +1359,7 @@ pub struct ToastNotification {
     pub context: String,
     pub position: Option<crate::config::ToastHerdrPosition>,
     pub target: Option<ToastTarget>,
+    pub island_record_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1417,6 +1454,14 @@ pub(crate) fn validate_compact_rail_marks(
             }
         })
         .collect()
+}
+
+pub(crate) fn validate_island_bell(mark: &str) -> String {
+    match UnicodeWidthStr::width(mark) {
+        1 => format!("{mark} "),
+        2 => mark.to_string(),
+        _ => "! ".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1572,6 +1617,10 @@ pub struct AppState {
     pub config_diagnostic: Option<String>,
     pub toast: Option<ToastNotification>,
     pub pending_agent_notifications: std::collections::HashMap<PaneId, PendingAgentNotification>,
+    pub(crate) island_records: std::collections::VecDeque<IslandRecord>,
+    pub(crate) island_panel_open: bool,
+    pub(crate) island_panel_list: MenuListState,
+    pub(crate) next_island_record_id: u64,
     pub copy_feedback: Option<CopyFeedback>,
     /// Last reported focus state for the outer terminal hosting herdr.
     /// None means unsupported or not yet reported, which preserves active-pane suppression.
@@ -1779,6 +1828,7 @@ impl AppState {
     ) -> bool {
         self.mouse_capture
             || self.popup_pane.is_some()
+            || self.island_panel_open
             || self.focused_pane_requests_mouse_capture_from(terminal_runtimes)
     }
 
@@ -1947,6 +1997,8 @@ impl AppState {
                 tab_hit_areas: Vec::new(),
                 island_marker_hit_areas: Vec::new(),
                 island_bell_hit_area: Rect::default(),
+                island_panel_hit_area: Rect::default(),
+                island_panel_record_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
                 new_tab_hit_area: Rect::default(),
@@ -1970,6 +2022,10 @@ impl AppState {
             config_diagnostic: None,
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
+            island_records: std::collections::VecDeque::new(),
+            island_panel_open: false,
+            island_panel_list: MenuListState::new(0),
+            next_island_record_id: 0,
             copy_feedback: None,
             outer_terminal_focus: None,
             prefix_code: KeyCode::Char('b'),
@@ -2135,6 +2191,10 @@ impl AppState {
                 "empty app state must not keep pending agent notifications"
             );
             assert!(
+                self.island_records.is_empty(),
+                "empty app state must not keep island records"
+            );
+            assert!(
                 self.copy_mode.is_none(),
                 "empty app state must not keep copy mode"
             );
@@ -2294,6 +2354,10 @@ impl AppState {
                 "pending agent notification",
             );
         }
+        assert!(
+            !self.island_records.is_empty() || !self.island_panel_open,
+            "an empty island record store must close the panel"
+        );
         if let Some(popup) = &self.popup_pane {
             assert!(
                 self.terminals.contains_key(&popup.terminal_id),
@@ -2494,6 +2558,14 @@ mod tests {
         )]));
 
         assert_eq!(marks.get("codex").map(String::as_str), Some("界"));
+    }
+
+    #[test]
+    fn island_bell_uses_the_compact_mark_width_contract() {
+        assert_eq!(validate_island_bell("!"), "! ");
+        assert_eq!(validate_island_bell("界"), "界");
+        assert_eq!(validate_island_bell(""), "! ");
+        assert_eq!(validate_island_bell("ABC"), "! ");
     }
 
     #[test]

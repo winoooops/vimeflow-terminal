@@ -1007,6 +1007,33 @@ pub(crate) fn handle_context_menu_key(
     }
 }
 
+pub(crate) fn handle_island_panel_key(state: &mut AppState, key: KeyEvent) {
+    if !state.island_panel_open {
+        return;
+    }
+    match key.code {
+        KeyCode::Esc => state.set_island_panel_open(false),
+        KeyCode::Up => state.island_panel_list.move_prev(),
+        KeyCode::Down => state
+            .island_panel_list
+            .move_next(state.island_records.len()),
+        KeyCode::Enter => {
+            if let Some(record_id) = state
+                .island_records
+                .get(state.island_panel_list.highlighted)
+                .map(|record| record.id)
+            {
+                state.open_island_record(record_id);
+            }
+        }
+        KeyCode::Char('r') if key.modifiers.is_empty() => {
+            state.mark_all_island_records_read();
+        }
+        KeyCode::Char('c') if key.modifiers.is_empty() => state.clear_island_records(),
+        _ => {}
+    }
+}
+
 impl App {
     pub(crate) fn handle_rename_key_via_api(&mut self, key: KeyEvent) {
         if let Some(action) = modal_action_from_key(&key, RENAME_ACTIONS) {
@@ -1451,6 +1478,71 @@ mod tests {
             workspace_create_label("  logs  ", "project").as_deref(),
             Some("logs")
         );
+    }
+
+    #[test]
+    fn island_panel_keyboard_transcript_navigates_reads_clears_and_closes() {
+        let mut state = state_with_workspaces(&["test"]);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let workspace_id = state.workspaces[0].id.clone();
+        let tab_id = crate::workspace::public_tab_id_for_number(&workspace_id, 1);
+        for reason in [
+            crate::app::state::IslandReason::TurnComplete,
+            crate::app::state::IslandReason::Blocked,
+        ] {
+            state
+                .push_island_record(crate::app::state::IslandRecord {
+                    id: 0,
+                    workspace_id: workspace_id.clone(),
+                    tab_id: tab_id.clone(),
+                    pane_id,
+                    agent: Some(crate::detect::Agent::Codex),
+                    reason,
+                    text: "codex notification".into(),
+                    at: std::time::SystemTime::now(),
+                    read: false,
+                })
+                .expect("test island record id");
+        }
+        state.set_island_panel_open(true);
+
+        handle_island_panel_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+        );
+        assert_eq!(state.island_panel_list.highlighted, 1);
+        handle_island_panel_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Up, KeyModifiers::empty()),
+        );
+        assert_eq!(state.island_panel_list.highlighted, 0);
+        handle_island_panel_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+        );
+        handle_island_panel_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+        );
+        assert!(state.island_records[1].read);
+        handle_island_panel_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty()),
+        );
+        assert!(state.island_records.iter().all(|record| record.read));
+        handle_island_panel_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+        assert!(!state.island_panel_open);
+
+        state.set_island_panel_open(true);
+        handle_island_panel_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
+        );
+        assert!(state.island_records.is_empty());
+        assert!(!state.island_panel_open);
     }
 
     fn mark_worktree_space_member(state: &mut AppState, ws_idx: usize, key: &str) {

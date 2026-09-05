@@ -109,10 +109,19 @@ impl AppState {
             return None;
         }
 
+        if self.island_panel_open {
+            return self.handle_island_panel_mouse(mouse);
+        }
+
         if self.mode == Mode::Terminal
             && self.clickable_toast_at(mouse.column, mouse.row)
             && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         {
+            if let Some(record_id) = self.toast.as_ref().and_then(|toast| toast.island_record_id) {
+                self.open_island_record(record_id);
+                self.toast = None;
+                return None;
+            }
             return Some(MouseAction::FocusToastTarget);
         }
 
@@ -494,6 +503,10 @@ impl AppState {
                 }
                 if self.on_tab_scroll_right_button(mouse.column, mouse.row) {
                     self.scroll_tabs_right();
+                    return None;
+                }
+                if rect_contains(self.view.island_bell_hit_area, mouse.column, mouse.row) {
+                    self.set_island_panel_open(!self.island_panel_open);
                     return None;
                 }
                 if let (Some(ws_idx), Some(tab_idx)) =
@@ -1476,8 +1489,50 @@ impl AppState {
     fn clickable_toast_at(&self, col: u16, row: u16) -> bool {
         self.toast
             .as_ref()
-            .is_some_and(|toast| toast.target.is_some())
+            .is_some_and(|toast| toast.target.is_some() || toast.island_record_id.is_some())
             && rect_contains(self.view.toast_hit_area, col, row)
+    }
+
+    fn handle_island_panel_mouse(&mut self, mouse: MouseEvent) -> Option<MouseAction> {
+        let record_at = || {
+            self.view
+                .island_panel_record_hit_areas
+                .iter()
+                .find(|(_, rect)| rect_contains(*rect, mouse.column, mouse.row))
+                .map(|(record_id, _)| *record_id)
+        };
+        match mouse.kind {
+            MouseEventKind::Moved => {
+                let hovered = record_at().and_then(|record_id| {
+                    self.island_records
+                        .iter()
+                        .position(|record| record.id == record_id)
+                });
+                self.island_panel_list.hover(hovered);
+            }
+            MouseEventKind::ScrollUp
+                if rect_contains(self.view.island_panel_hit_area, mouse.column, mouse.row) =>
+            {
+                self.island_panel_list.move_prev();
+            }
+            MouseEventKind::ScrollDown
+                if rect_contains(self.view.island_panel_hit_area, mouse.column, mouse.row) =>
+            {
+                self.island_panel_list.move_next(self.island_records.len());
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if rect_contains(self.view.island_bell_hit_area, mouse.column, mouse.row) {
+                    self.set_island_panel_open(false);
+                } else if let Some(record_id) = record_at() {
+                    self.open_island_record(record_id);
+                } else if !rect_contains(self.view.island_panel_hit_area, mouse.column, mouse.row) {
+                    self.set_island_panel_open(false);
+                }
+            }
+            MouseEventKind::Down(_) => self.set_island_panel_open(false),
+            _ => {}
+        }
+        None
     }
 
     #[cfg(test)]
@@ -1900,7 +1955,10 @@ mod tests {
     use super::*;
     use crate::app::input::modal::handle_context_menu_key;
     use crate::{
-        app::state::{ContextMenuKind, ContextMenuState, MenuListState, Mode, ViewLayout},
+        app::state::{
+            ContextMenuKind, ContextMenuState, IslandReason, IslandRecord, MenuListState, Mode,
+            ViewLayout,
+        },
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
@@ -2616,6 +2674,7 @@ mod tests {
         app.state.selected = 0;
         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         app.state.toast_config.delay_seconds = 0;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Silent;
         let target_terminal_id = app.state.workspaces[1]
             .panes
             .get(&target_pane)
@@ -2681,6 +2740,7 @@ mod tests {
                 workspace_id,
                 pane_id: target_pane,
             }),
+            island_record_id: None,
         });
         app.state.mode = Mode::Settings;
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
@@ -3499,6 +3559,144 @@ mod tests {
         assert_eq!(app.state.workspaces[0].active_tab, second_tab_idx);
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(second_pane));
         assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn left_click_island_bell_toggles_the_panel_flag() {
+        let mut app = app_for_mouse_test();
+        let ws = Workspace::test_new("one");
+        let pane_id = ws.tabs[0].root_pane;
+        let workspace_id = ws.id.clone();
+        let tab_id = crate::workspace::public_tab_id_for_number(&workspace_id, 1);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state
+            .push_island_record(IslandRecord {
+                id: 0,
+                workspace_id,
+                tab_id,
+                pane_id,
+                agent: Some(Agent::Codex),
+                reason: IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::UNIX_EPOCH,
+                read: false,
+            })
+            .expect("test island record id");
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let bell = app.state.view.island_bell_hit_area;
+        assert_eq!(bell.width, 5);
+        assert_eq!(app.state.tab_at(bell.x, bell.y), None);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            bell.x,
+            bell.y,
+        ));
+        assert!(app.state.island_panel_open);
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let row = app.state.view.island_panel_record_hit_areas[0].1;
+        assert!(row.width > 0);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), row.x, row.y));
+        assert!(app.state.island_records[0].read);
+        assert!(app.state.island_panel_open);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            bell.x,
+            bell.y,
+        ));
+        assert!(!app.state.island_panel_open);
+    }
+
+    #[test]
+    fn island_panel_outside_click_closes_before_pane_input() {
+        let mut app = app_for_mouse_test();
+        let ws = Workspace::test_new("one");
+        let pane_id = ws.tabs[0].root_pane;
+        let workspace_id = ws.id.clone();
+        let tab_id = crate::workspace::public_tab_id_for_number(&workspace_id, 1);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.mode = Mode::Terminal;
+        app.state
+            .push_island_record(IslandRecord {
+                id: 0,
+                workspace_id,
+                tab_id,
+                pane_id,
+                agent: Some(Agent::Codex),
+                reason: IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::now(),
+                read: false,
+            })
+            .expect("test island record id");
+        app.state.set_island_panel_open(true);
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let panel = app.state.view.island_panel_hit_area;
+        assert!(panel.width > 0);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            panel.right(),
+            panel.bottom(),
+        ));
+
+        assert!(!app.state.island_panel_open);
+        assert!(app.state.selection.is_none());
+    }
+
+    #[test]
+    fn island_toast_click_opens_its_record_without_an_ordinary_target() {
+        let mut app = app_for_mouse_test();
+        let first = Workspace::test_new("first");
+        let second = Workspace::test_new("second");
+        let pane_id = second.tabs[0].root_pane;
+        let workspace_id = second.id.clone();
+        let tab_id = crate::workspace::public_tab_id_for_number(&workspace_id, 1);
+        app.state.workspaces = vec![first, second];
+        app.state.active = Some(0);
+        app.state.mode = Mode::Terminal;
+        let record_id = app
+            .state
+            .push_island_record(IslandRecord {
+                id: 0,
+                workspace_id,
+                tab_id,
+                pane_id,
+                agent: Some(Agent::Codex),
+                reason: IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::now(),
+                read: false,
+            })
+            .expect("test island record id");
+        app.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::Finished,
+            title: "codex finished".into(),
+            context: "second".into(),
+            position: None,
+            target: None,
+            island_record_id: Some(record_id),
+        });
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let toast = app.state.view.toast_hit_area;
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            toast.x,
+            toast.y,
+        ));
+
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(pane_id));
+        assert!(app.state.island_records[0].read);
+        assert!(app.state.toast.is_none());
     }
 
     #[test]

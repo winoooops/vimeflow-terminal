@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use std::borrow::Cow;
 
 use ratatui::{
@@ -77,6 +78,10 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
             help_entry(
                 keybind_label(&kb.open_notification_target),
                 "open notification target",
+            ),
+            help_entry(
+                keybind_label(&kb.island_panel_toggle),
+                "island notifications",
             ),
         ],
     ));

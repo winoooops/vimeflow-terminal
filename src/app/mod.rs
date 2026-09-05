@@ -625,6 +625,8 @@ impl App {
                 tab_hit_areas: Vec::new(),
                 island_marker_hit_areas: Vec::new(),
                 island_bell_hit_area: Rect::default(),
+                island_panel_hit_area: Rect::default(),
+                island_panel_record_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
                 new_tab_hit_area: Rect::default(),
@@ -648,6 +650,10 @@ impl App {
             config_diagnostic,
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
+            island_records: std::collections::VecDeque::new(),
+            island_panel_open: false,
+            island_panel_list: state::MenuListState::new(0),
+            next_island_record_id: 0,
             copy_feedback: None,
             outer_terminal_focus: None,
             prefix_code,
@@ -693,7 +699,7 @@ impl App {
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             tab_bar_position: config.ui.tab_bar_position,
             tab_bar_style: config.ui.tab_bar_style,
-            island: config.ui.island,
+            island: config.ui.island.clone(),
             island_anim: None,
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
@@ -922,15 +928,12 @@ impl App {
         self.full_redraw_pending = true;
     }
 
-    pub(crate) fn sync_prefix_input_source(&mut self, previous_mode: Mode) {
+    pub(crate) fn sync_prefix_input_source(&mut self, previous_wants_ascii: bool) {
         // Emit the input-source intent on entering/leaving the ASCII realm, like `ClipboardWrite`;
         // the foreground (client, or this app in monolithic mode) applies the switch. Keyed on the
         // realm so multi-level prefix commands stay ASCII. The switch is flag-gated but the restore
         // always fires on exit, so a mid-interaction flag toggle can't strand the host on ASCII.
-        let active = match (
-            previous_mode.wants_ascii_input(),
-            self.state.mode.wants_ascii_input(),
-        ) {
+        let active = match (previous_wants_ascii, self.state.wants_ascii_input()) {
             (false, true) if self.state.switch_ascii_input_source_in_prefix => true,
             (true, false) => false,
             _ => return,
@@ -947,9 +950,9 @@ impl App {
         &mut self,
         event: crate::events::AppEvent,
     ) -> bool {
-        let previous_mode = self.state.mode;
+        let previous_wants_ascii = self.state.wants_ascii_input();
         let changed = self.handle_internal_event_with_render_impact(event);
-        self.sync_prefix_input_source(previous_mode);
+        self.sync_prefix_input_source(previous_wants_ascii);
         changed
     }
 
@@ -1512,7 +1515,10 @@ impl App {
                     self.clear_island_animation();
                 }
                 self.state.tab_bar_style = config.ui.tab_bar_style;
-                self.state.island = config.ui.island;
+                self.state.island = config.ui.island.clone();
+                if self.state.tab_bar_style == crate::config::TabBarStyleConfig::Classic {
+                    self.state.set_island_panel_open(false);
+                }
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 let previous_agents_view = self.state.agents_view;
@@ -1630,6 +1636,7 @@ impl App {
                     context: "using config.toml".to_string(),
                     position: None,
                     target: None,
+                    island_record_id: None,
                 });
             }
         } else {
@@ -1642,6 +1649,7 @@ impl App {
                     context: "with warnings".to_string(),
                     position: None,
                     target: None,
+                    island_record_id: None,
                 });
             }
         }
@@ -1753,7 +1761,7 @@ impl App {
         apply_host_terminal_theme: bool,
     ) {
         for event in events {
-            let previous_mode = self.state.mode;
+            let previous_wants_ascii = self.state.wants_ascii_input();
             match event {
                 crate::raw_input::RawInputEvent::Key(key) => {
                     let lease_key = input::InputLeaseKey::new(source_id, &key);
@@ -1798,7 +1806,10 @@ impl App {
                     self.handle_text_commit_headless(text.as_str());
                 }
                 crate::raw_input::RawInputEvent::Mouse(mouse) => {
-                    if self.state.popup_pane.is_some() || self.state.mouse_capture {
+                    if self.state.popup_pane.is_some()
+                        || self.state.island_panel_open
+                        || self.state.mouse_capture
+                    {
                         self.handle_mouse_event_headless(source_id, mouse);
                     } else {
                         self.state
@@ -1850,7 +1861,7 @@ impl App {
                 crate::raw_input::RawInputEvent::HostCellSizeReport { .. } => {}
                 crate::raw_input::RawInputEvent::Unsupported => {}
             }
-            self.sync_prefix_input_source(previous_mode);
+            self.sync_prefix_input_source(previous_wants_ascii);
         }
     }
 
@@ -1864,6 +1875,10 @@ impl App {
     /// since the server doesn't have the async context of the monolithic App.
     fn handle_non_terminal_key_headless(&mut self, key: crate::input::TerminalKey) {
         let key_event = key.as_key_event();
+        if self.state.island_panel_open {
+            input::handle_island_panel_key(&mut self.state, key_event);
+            return;
+        }
         if input::modal_paste_target_active(&self.state)
             && input::is_modal_paste_shortcut(&key_event)
         {
@@ -2151,12 +2166,12 @@ mod tests {
 
         // Terminal -> Prefix emits the ASCII-switch intent.
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(Mode::Terminal);
+        app.sync_prefix_input_source(false);
         assert_eq!(drained_prefix_active(&mut app), vec![true]);
 
         // Prefix -> Terminal emits the restore intent.
         app.state.mode = Mode::Terminal;
-        app.sync_prefix_input_source(Mode::Prefix);
+        app.sync_prefix_input_source(true);
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2167,13 +2182,13 @@ mod tests {
 
         // Entering the realm with the flag off emits nothing.
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(Mode::Terminal);
+        app.sync_prefix_input_source(false);
         assert!(drained_prefix_active(&mut app).is_empty());
 
         // Leaving the realm still emits the restore (harmless if nothing was switched), so a
         // mid-interaction flag toggle can't strand the host on ASCII.
         app.state.mode = Mode::Terminal;
-        app.sync_prefix_input_source(Mode::Prefix);
+        app.sync_prefix_input_source(true);
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2212,20 +2227,31 @@ mod tests {
     }
 
     #[test]
+    fn open_island_panel_makes_the_input_source_decision_ascii_capable() {
+        let mut app = test_app();
+        app.state.mode = Mode::Terminal;
+        assert!(!app.state.wants_ascii_input());
+
+        app.state.island_panel_open = true;
+
+        assert!(app.state.wants_ascii_input());
+    }
+
+    #[test]
     fn sync_prefix_input_source_keeps_realm_across_multi_level_prefix_commands() {
         let mut app = test_app();
         app.state.switch_ascii_input_source_in_prefix = true;
 
         // Terminal -> Prefix switches once.
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(Mode::Terminal);
+        app.sync_prefix_input_source(false);
         assert_eq!(drained_prefix_active(&mut app), vec![true]);
 
         // Prefix -> sub-mode and sub-mode -> sub-mode stay in the realm: no emit.
         app.state.mode = Mode::Navigator;
-        app.sync_prefix_input_source(Mode::Prefix);
+        app.sync_prefix_input_source(true);
         app.state.mode = Mode::Resize;
-        app.sync_prefix_input_source(Mode::Navigator);
+        app.sync_prefix_input_source(true);
         assert!(
             drained_prefix_active(&mut app).is_empty(),
             "must not switch or restore while still in the realm"
@@ -2233,7 +2259,7 @@ mod tests {
 
         // Leaving the realm back to the terminal restores.
         app.state.mode = Mode::Terminal;
-        app.sync_prefix_input_source(Mode::Resize);
+        app.sync_prefix_input_source(true);
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2243,12 +2269,12 @@ mod tests {
         app.state.switch_ascii_input_source_in_prefix = true;
 
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(Mode::Terminal);
+        app.sync_prefix_input_source(false);
         assert_eq!(drained_prefix_active(&mut app), vec![true]);
 
         // Prefix -> RenameTab leaves the realm (text entry wants the IME): restore.
         app.state.mode = Mode::RenameTab;
-        app.sync_prefix_input_source(Mode::Prefix);
+        app.sync_prefix_input_source(true);
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2433,6 +2459,7 @@ mod tests {
             context: "background · 2".to_string(),
             position: None,
             target: None,
+            island_record_id: None,
         });
         let original_toast = app.state.toast.clone();
 
@@ -2557,6 +2584,7 @@ mod tests {
             context: "background · 2".to_string(),
             position: None,
             target: None,
+            island_record_id: None,
         });
 
         let response =
@@ -3241,11 +3269,19 @@ mod tests {
             app.state.island.motion,
             crate::config::IslandMotionConfig::Smooth
         );
+        assert_eq!(
+            app.state.island.arrivals,
+            crate::config::IslandArrivalsConfig::Toast
+        );
+        assert_eq!(app.state.island.bell, "🔔");
 
         config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Classic;
         config.ui.island.position = crate::config::IslandPositionConfig::Left;
         config.ui.island.display = crate::config::IslandDisplayConfig::Labels;
         config.ui.island.motion = crate::config::IslandMotionConfig::Off;
+        config.ui.island.arrivals = crate::config::IslandArrivalsConfig::Silent;
+        config.ui.island.bell = "B".to_string();
+        app.state.island_panel_open = true;
         app.apply_live_config(&config, &[], &[], false);
         assert_eq!(
             app.state.tab_bar_style,
@@ -3263,11 +3299,19 @@ mod tests {
             app.state.island.motion,
             crate::config::IslandMotionConfig::Off
         );
+        assert_eq!(
+            app.state.island.arrivals,
+            crate::config::IslandArrivalsConfig::Silent
+        );
+        assert_eq!(app.state.island.bell, "B");
+        assert!(!app.state.island_panel_open);
 
         config.ui.tab_bar_style = crate::config::TabBarStyleConfig::Island;
         config.ui.island.position = crate::config::IslandPositionConfig::Center;
         config.ui.island.display = crate::config::IslandDisplayConfig::Dots;
         config.ui.island.motion = crate::config::IslandMotionConfig::Steps;
+        config.ui.island.arrivals = crate::config::IslandArrivalsConfig::Toast;
+        config.ui.island.bell = "!".to_string();
         app.apply_live_config(&config, &[], &[], false);
         assert_eq!(
             app.state.tab_bar_style,
@@ -3285,6 +3329,11 @@ mod tests {
             app.state.island.motion,
             crate::config::IslandMotionConfig::Steps
         );
+        assert_eq!(
+            app.state.island.arrivals,
+            crate::config::IslandArrivalsConfig::Toast
+        );
+        assert_eq!(app.state.island.bell, "!");
     }
 
     fn test_island_anim() -> state::IslandAnim {

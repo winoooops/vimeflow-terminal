@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use bytes::Bytes;
 use crossterm::event::KeyCode;
 use tracing::{debug, warn};
@@ -51,6 +53,10 @@ impl App {
                 };
                 return runtime.try_send_bytes(bytes).is_ok().then_some(target);
             }
+        }
+        if self.state.island_panel_open {
+            super::handle_island_panel_key(&mut self.state, key.as_key_event());
+            return None;
         }
 
         let input = self.prepare_terminal_key_forward(source_id, key)?;
@@ -809,6 +815,7 @@ mod tests {
                 workspace_id: "missing".into(),
                 pane_id: info.id,
             }),
+            island_record_id: None,
         });
         app.state.view.toast_hit_area = Rect::new(0, 0, 1, 1);
 

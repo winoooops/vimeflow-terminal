@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 //! Input handling — translates crossterm key/mouse events into state mutations.
 
 use bytes::Bytes;
@@ -51,9 +52,9 @@ mod terminal;
 pub(crate) use self::{
     lease::{ConsumedInputLease, ForwardedInputLease, InputLeaseKey, InputLeaseTable, RepeatPlan},
     modal::{
-        handle_global_menu_key, handle_keybind_help_key, handle_navigator_key,
-        insert_keybind_help_query_text, insert_navigator_search_text, insert_rename_input_text,
-        open_new_workspace_dialog,
+        handle_global_menu_key, handle_island_panel_key, handle_keybind_help_key,
+        handle_navigator_key, insert_keybind_help_query_text, insert_navigator_search_text,
+        insert_rename_input_text, open_new_workspace_dialog,
     },
     navigate::{
         terminal_direct_indexed_navigation_action, terminal_direct_non_indexed_navigation_action,
@@ -83,6 +84,10 @@ impl App {
             return self.handle_terminal_key(key).await;
         }
         let key_event = key.as_key_event();
+        if self.state.island_panel_open {
+            handle_island_panel_key(&mut self.state, key_event);
+            return None;
+        }
         if modal_paste_target_active(&self.state) && is_modal_paste_shortcut(&key_event) {
             if let Some(text) = crate::platform::read_clipboard_text() {
                 self.paste_into_active_text_input(&text);

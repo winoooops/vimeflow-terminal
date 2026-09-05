@@ -62,7 +62,7 @@ impl App {
         &mut self,
         msg: crate::api::ApiRequestMessage,
     ) -> bool {
-        let previous_mode = self.state.mode;
+        let previous_wants_ascii = self.state.wants_ascii_input();
         let mut changed = self.expire_due_metadata(Instant::now());
         changed |= crate::api::request_changes_ui(&msg.request);
         let skip_default_workspace = matches!(
@@ -81,7 +81,7 @@ impl App {
             if !skip_default_workspace {
                 changed |= self.ensure_default_workspace();
             }
-            self.sync_prefix_input_source(previous_mode);
+            self.sync_prefix_input_source(previous_wants_ascii);
             return changed | deferred_changed;
         }
         let response = self.handle_api_request(msg.request);
@@ -89,7 +89,7 @@ impl App {
             changed |= self.ensure_default_workspace();
         }
         let _ = msg.respond_to.send(response);
-        self.sync_prefix_input_source(previous_mode);
+        self.sync_prefix_input_source(previous_wants_ascii);
         changed
     }
 
@@ -176,7 +176,7 @@ impl App {
         &mut self,
         event: crate::raw_input::RawInputEvent,
     ) -> bool {
-        let previous_mode = self.state.mode;
+        let previous_wants_ascii = self.state.wants_ascii_input();
         let changed = match event {
             crate::raw_input::RawInputEvent::Key(key) => {
                 let lease_key = super::input::InputLeaseKey::new(super::LOCAL_INPUT_SOURCE, &key);
@@ -225,8 +225,12 @@ impl App {
             }
             crate::raw_input::RawInputEvent::Mouse(mouse) => {
                 let changes_view = !matches!(mouse.kind, crossterm::event::MouseEventKind::Moved)
-                    || self.state.mode.mouse_motion_changes_view();
-                if self.state.popup_pane.is_some() || self.state.mouse_capture {
+                    || self.state.mode.mouse_motion_changes_view()
+                    || self.state.island_panel_open;
+                if self.state.popup_pane.is_some()
+                    || self.state.island_panel_open
+                    || self.state.mouse_capture
+                {
                     self.handle_mouse(mouse);
                 } else {
                     self.state
@@ -263,7 +267,7 @@ impl App {
             crate::raw_input::RawInputEvent::HostCellSizeReport { .. } => false,
             crate::raw_input::RawInputEvent::Unsupported => false,
         };
-        self.sync_prefix_input_source(previous_mode);
+        self.sync_prefix_input_source(previous_wants_ascii);
         self.shutdown_detached_terminal_runtimes();
         changed
     }

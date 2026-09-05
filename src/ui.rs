@@ -29,6 +29,7 @@ use self::dialogs::{
     render_open_existing_worktree_overlay, render_remove_worktree_overlay, render_rename_overlay,
 };
 pub(crate) use self::island::island_animation_for_tab_change;
+use self::island::{compute_island_panel_view, render_island_panel};
 use self::keybind_help::render_keybind_help_overlay;
 use self::menus::{
     render_context_menu, render_copy_mode_overlay, render_global_launcher_menu,
@@ -268,6 +269,8 @@ fn compute_view_internal(
 
     let tab_bar_view = compute_tab_bar_view(app, tab_bar_rect);
     app.tab_scroll = tab_bar_view.scroll;
+    let island_panel_view =
+        compute_island_panel_view(app, area, tab_bar_rect, tab_bar_view.island_capsule_rect);
 
     let TabSurfaceLayout {
         pane_infos,
@@ -305,6 +308,8 @@ fn compute_view_internal(
         tab_hit_areas: tab_bar_view.tab_hit_areas,
         island_marker_hit_areas: tab_bar_view.island_marker_hit_areas,
         island_bell_hit_area: tab_bar_view.island_bell_hit_area,
+        island_panel_hit_area: island_panel_view.rect,
+        island_panel_record_hit_areas: island_panel_view.record_hit_areas,
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
         new_tab_hit_area: tab_bar_view.new_tab_hit_area,
@@ -370,6 +375,8 @@ fn compute_mobile_view(
         tab_hit_areas: Vec::new(),
         island_marker_hit_areas: Vec::new(),
         island_bell_hit_area: Rect::default(),
+        island_panel_hit_area: Rect::default(),
+        island_panel_record_hit_areas: Vec::new(),
         tab_scroll_left_hit_area: Rect::default(),
         tab_scroll_right_hit_area: Rect::default(),
         new_tab_hit_area: Rect::default(),
@@ -455,6 +462,9 @@ pub fn render_with_runtime_registry(
         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
         Mode::Terminal => {}
+    }
+    if app.island_panel_open {
+        render_island_panel(app, frame);
     }
 }
 
@@ -611,6 +621,7 @@ mod tests {
             context: "workspace · 1".into(),
             position: None,
             target: None,
+            island_record_id: None,
         };
 
         let bottom_right_toast = toast_notification_rect(
@@ -757,6 +768,7 @@ mod tests {
             context: "one".into(),
             position: None,
             target: None,
+            island_record_id: None,
         });
 
         compute_view(&mut app, Rect::new(0, 0, 100, 20));
@@ -782,6 +794,7 @@ mod tests {
             context: "one".into(),
             position: None,
             target: None,
+            island_record_id: None,
         });
 
         compute_view(&mut app, Rect::new(0, 0, 100, 20));
