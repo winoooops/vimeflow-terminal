@@ -1371,6 +1371,7 @@ pub struct PendingAgentNotification {
     pub kind: ToastKind,
     pub state: AgentState,
     pub deadline: std::time::Instant,
+    pub island_toast_emitted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -2640,6 +2640,53 @@ mod tests {
     }
 
     #[test]
+    fn delayed_herdr_island_arrival_keeps_toast_identity_and_lifetime() {
+        let mut app = test_app();
+        let background = Workspace::test_new("background");
+        let pane_id = background.tabs[0].root_pane;
+        app.state.workspaces = vec![background, Workspace::test_new("foreground")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(1);
+        app.state.selected = 1;
+        app.state.mode = Mode::Terminal;
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Toast;
+        app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
+        app.state.toast_config.delay_seconds = 1;
+        app.state.sound.enabled = false;
+
+        app.handle_internal_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Pi),
+            state: AgentState::Blocked,
+            visible_blocker: false,
+            visible_working: false,
+            process_exited: false,
+            observed_at: Instant::now(),
+        });
+        let arrival_toast = app
+            .state
+            .toast
+            .clone()
+            .expect("immediate island arrival toast");
+        let toast_deadline = app.toast_deadline.expect("island toast deadline");
+        let notification_deadline = app
+            .state
+            .next_pending_agent_notification_deadline()
+            .expect("pending notification deadline");
+        assert!(notification_deadline < toast_deadline);
+        app.next_resize_poll = toast_deadline + Duration::from_secs(1);
+
+        assert!(app.handle_scheduled_tasks(notification_deadline, false));
+        assert_eq!(app.state.toast, Some(arrival_toast));
+        assert_eq!(app.toast_deadline, Some(toast_deadline));
+
+        assert!(app.handle_scheduled_tasks(toast_deadline, false));
+        assert!(app.state.toast.is_none());
+        assert!(app.toast_deadline.is_none());
+    }
+
+    #[test]
     fn notification_show_api_respects_off_delivery() {
         let mut app = test_app();
         app.state.toast_config.delivery = crate::config::ToastDelivery::Off;
