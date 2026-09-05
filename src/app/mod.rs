@@ -152,6 +152,7 @@ pub struct App {
     /// even when an App-internal drain consumes the event before the forwarding drain.
     pub(crate) local_input_source_switch: bool,
     pub(crate) config_reloaded_from_disk: bool,
+    prefix_input_source_active_sent: bool,
     prefix_input_source: Box<dyn crate::platform::PrefixInputSource>,
 }
 
@@ -839,6 +840,7 @@ impl App {
             local_terminal_notifications: true,
             local_input_source_switch: true,
             config_reloaded_from_disk: false,
+            prefix_input_source_active_sent: false,
             prefix_input_source: Box::new(crate::platform::RealPrefixInputSource::default()),
         }
     }
@@ -928,31 +930,40 @@ impl App {
         self.full_redraw_pending = true;
     }
 
-    pub(crate) fn sync_prefix_input_source(&mut self, previous_wants_ascii: bool) {
-        // Emit the input-source intent on entering/leaving the ASCII realm, like `ClipboardWrite`;
-        // the foreground (client, or this app in monolithic mode) applies the switch. Keyed on the
-        // realm so multi-level prefix commands stay ASCII. The switch is flag-gated but the restore
-        // always fires on exit, so a mid-interaction flag toggle can't strand the host on ASCII.
-        let active = match (previous_wants_ascii, self.state.wants_ascii_input()) {
-            (false, true) if self.state.switch_ascii_input_source_in_prefix => true,
-            (true, false) => false,
-            _ => return,
-        };
-        if let Err(err) = self
+    pub(crate) fn sync_prefix_input_source(&mut self) {
+        // Compare with the last successfully queued intent so geometry-driven modal closures are
+        // restored even though they do not pass through an input dispatch transition.
+        let active =
+            self.state.wants_ascii_input() && self.state.switch_ascii_input_source_in_prefix;
+        if active == self.prefix_input_source_active_sent {
+            return;
+        }
+        match self
             .event_tx
             .try_send(crate::events::AppEvent::PrefixInputSource { active })
         {
-            tracing::warn!(active, %err, "failed to queue prefix input-source change");
+            Ok(()) => self.prefix_input_source_active_sent = active,
+            Err(err) => tracing::warn!(active, %err, "failed to queue prefix input-source change"),
         }
+    }
+
+    /// Reconcile shared panel state only after computing the foreground client's geometry.
+    pub(crate) fn reconcile_island_panel_from_foreground_view(&mut self) {
+        if self.state.island_panel_open
+            && (self.state.view.island_panel_hit_area.width == 0
+                || self.state.view.island_panel_hit_area.height == 0)
+        {
+            self.state.set_island_panel_open(false);
+        }
+        self.sync_prefix_input_source();
     }
 
     pub(crate) fn handle_internal_event_with_prefix_sync(
         &mut self,
         event: crate::events::AppEvent,
     ) -> bool {
-        let previous_wants_ascii = self.state.wants_ascii_input();
         let changed = self.handle_internal_event_with_render_impact(event);
-        self.sync_prefix_input_source(previous_wants_ascii);
+        self.sync_prefix_input_source();
         changed
     }
 
@@ -1136,6 +1147,7 @@ impl App {
                             area,
                         );
                     }
+                    self.reconcile_island_panel_from_foreground_view();
                     crate::ui::render_with_runtime_registry(
                         &self.state,
                         &self.terminal_runtimes,
@@ -1761,7 +1773,6 @@ impl App {
         apply_host_terminal_theme: bool,
     ) {
         for event in events {
-            let previous_wants_ascii = self.state.wants_ascii_input();
             match event {
                 crate::raw_input::RawInputEvent::Key(key) => {
                     let lease_key = input::InputLeaseKey::new(source_id, &key);
@@ -1817,10 +1828,9 @@ impl App {
                     }
                 }
                 crate::raw_input::RawInputEvent::Paste(text) => {
-                    if self.try_route_paste_to_popup(&text) {
-                    } else if self.state.mode != Mode::Terminal {
-                        self.paste_into_active_text_input(&text);
-                    } else {
+                    if !self.try_route_paste_to_popup(&text)
+                        && !self.paste_into_active_text_input(&text)
+                    {
                         if let Some(ws_idx) = self.state.active {
                             if let Some(ws) = self.state.workspaces.get(ws_idx) {
                                 if let Some(focused) = ws.focused_pane_id() {
@@ -1861,7 +1871,7 @@ impl App {
                 crate::raw_input::RawInputEvent::HostCellSizeReport { .. } => {}
                 crate::raw_input::RawInputEvent::Unsupported => {}
             }
-            self.sync_prefix_input_source(previous_wants_ascii);
+            self.sync_prefix_input_source();
         }
     }
 
@@ -2089,6 +2099,37 @@ mod tests {
         )
     }
 
+    fn open_test_island_panel(app: &mut App, area: Rect) {
+        let workspace = Workspace::test_new("one");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        app.state.hide_tab_bar_when_single_tab = true;
+        app.state.switch_ascii_input_source_in_prefix = true;
+        app.state
+            .push_island_record(state::IslandRecord {
+                id: 0,
+                workspace_id: "w1".into(),
+                tab_id: "w1:t1".into(),
+                pane_id,
+                agent: Some(Agent::Codex),
+                reason: state::IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::UNIX_EPOCH,
+                read: false,
+            })
+            .expect("test island record id");
+        app.state.set_island_panel_open(true);
+        crate::ui::compute_view_with_runtime_registry(&mut app.state, &app.terminal_runtimes, area);
+        app.reconcile_island_panel_from_foreground_view();
+        assert!(app.state.island_panel_open);
+        assert!(app.state.view.island_panel_hit_area.width > 0);
+        assert_eq!(drained_prefix_active(app), vec![true]);
+    }
+
     fn unique_temp_path(name: &str) -> std::path::PathBuf {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2165,12 +2206,12 @@ mod tests {
 
         // Terminal -> Prefix emits the ASCII-switch intent.
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(false);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![true]);
 
         // Prefix -> Terminal emits the restore intent.
         app.state.mode = Mode::Terminal;
-        app.sync_prefix_input_source(true);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2181,13 +2222,61 @@ mod tests {
 
         // Entering the realm with the flag off emits nothing.
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(false);
+        app.sync_prefix_input_source();
         assert!(drained_prefix_active(&mut app).is_empty());
 
-        // Leaving the realm still emits the restore (harmless if nothing was switched), so a
-        // mid-interaction flag toggle can't strand the host on ASCII.
+        // Leaving also emits nothing because no active intent was sent.
         app.state.mode = Mode::Terminal;
-        app.sync_prefix_input_source(true);
+        app.sync_prefix_input_source();
+        assert!(drained_prefix_active(&mut app).is_empty());
+    }
+
+    #[test]
+    fn sync_prefix_input_source_restores_after_silent_panel_closure() {
+        let mut app = test_app();
+        app.state.switch_ascii_input_source_in_prefix = true;
+        app.state.island_panel_open = true;
+        app.sync_prefix_input_source();
+        assert_eq!(drained_prefix_active(&mut app), vec![true]);
+
+        app.state.island_panel_open = false;
+        app.sync_prefix_input_source();
+        assert_eq!(drained_prefix_active(&mut app), vec![false]);
+    }
+
+    #[test]
+    fn foreground_mobile_geometry_closes_panel_and_restores_input_source() {
+        let mut app = test_app();
+        open_test_island_panel(&mut app, Rect::new(0, 0, 100, 20));
+
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &app.terminal_runtimes,
+            Rect::new(0, 0, 44, 20),
+        );
+        app.reconcile_island_panel_from_foreground_view();
+
+        assert_eq!(app.state.view.layout, state::ViewLayout::Mobile);
+        assert!(!app.state.island_panel_open);
+        assert!(!app.state.wants_ascii_input());
+        assert_eq!(drained_prefix_active(&mut app), vec![false]);
+    }
+
+    #[test]
+    fn foreground_short_desktop_closes_panel_and_restores_input_source() {
+        let mut app = test_app();
+        open_test_island_panel(&mut app, Rect::new(0, 0, 100, 20));
+
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &app.terminal_runtimes,
+            Rect::new(0, 0, 100, 3),
+        );
+        app.reconcile_island_panel_from_foreground_view();
+
+        assert_eq!(app.state.view.layout, state::ViewLayout::Desktop);
+        assert!(!app.state.island_panel_open);
+        assert!(!app.state.wants_ascii_input());
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2243,14 +2332,14 @@ mod tests {
 
         // Terminal -> Prefix switches once.
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(false);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![true]);
 
         // Prefix -> sub-mode and sub-mode -> sub-mode stay in the realm: no emit.
         app.state.mode = Mode::Navigator;
-        app.sync_prefix_input_source(true);
+        app.sync_prefix_input_source();
         app.state.mode = Mode::Resize;
-        app.sync_prefix_input_source(true);
+        app.sync_prefix_input_source();
         assert!(
             drained_prefix_active(&mut app).is_empty(),
             "must not switch or restore while still in the realm"
@@ -2258,7 +2347,7 @@ mod tests {
 
         // Leaving the realm back to the terminal restores.
         app.state.mode = Mode::Terminal;
-        app.sync_prefix_input_source(true);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 
@@ -2268,12 +2357,12 @@ mod tests {
         app.state.switch_ascii_input_source_in_prefix = true;
 
         app.state.mode = Mode::Prefix;
-        app.sync_prefix_input_source(false);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![true]);
 
         // Prefix -> RenameTab leaves the realm (text entry wants the IME): restore.
         app.state.mode = Mode::RenameTab;
-        app.sync_prefix_input_source(true);
+        app.sync_prefix_input_source();
         assert_eq!(drained_prefix_active(&mut app), vec![false]);
     }
 

@@ -1119,6 +1119,7 @@ impl HeadlessServer {
                 area,
             );
         }
+        self.app.reconcile_island_panel_from_foreground_view();
 
         // Shared runtime size changes affect pane wrapping and foreground-driven
         // rendering semantics. Force one fresh frame to every remaining client
@@ -4162,6 +4163,9 @@ impl HeadlessServer {
                             is_foreground,
                             render_cell_size,
                         );
+                    if is_foreground {
+                        self.app.reconcile_island_panel_from_foreground_view();
+                    }
                     crate::render_prof::duration_since(
                         "full_render.render_virtual",
                         render_started,
@@ -8408,6 +8412,74 @@ next_tab = ""
         drop(server);
         drop(_runtime_guard);
         rt.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    #[test]
+    fn narrow_background_client_does_not_close_foreground_island_panel() {
+        let mut server = test_headless_server();
+        let workspace = crate::workspace::Workspace::test_new("test");
+        let pane_id = workspace.tabs[0].root_pane;
+        server.app.state.workspaces = vec![workspace];
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+        server.app.state.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+
+        let (foreground_tx, _foreground_control_rx, _foreground_rx) = test_client_writer();
+        let (background_tx, _background_control_rx, _background_rx) = test_client_writer();
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (120, 20),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                1,
+                RenderEncoding::SemanticFrame,
+                Some(foreground_tx),
+            ),
+        );
+        server.clients.insert(
+            2,
+            ClientConnection::new(
+                (44, 20),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                2,
+                RenderEncoding::SemanticFrame,
+                Some(background_tx),
+            ),
+        );
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+        server.resize_shared_runtime_to_effective_size();
+
+        server
+            .app
+            .state
+            .push_island_record(crate::app::state::IslandRecord {
+                id: 0,
+                workspace_id: "w1".into(),
+                tab_id: "w1:t1".into(),
+                pane_id,
+                agent: Some(crate::detect::Agent::Codex),
+                reason: crate::app::state::IslandReason::TurnComplete,
+                text: "codex turn complete".into(),
+                at: std::time::SystemTime::UNIX_EPOCH,
+                read: false,
+            })
+            .expect("test island record id");
+        server.app.state.set_island_panel_open(true);
+
+        server.render_and_stream();
+
+        assert!(server.app.state.island_panel_open);
+        assert_eq!(
+            server.app.state.view.layout,
+            crate::app::state::ViewLayout::Desktop
+        );
+        assert!(server.app.state.view.island_panel_hit_area.width > 0);
     }
 
     #[test]

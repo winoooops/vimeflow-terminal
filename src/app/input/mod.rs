@@ -162,8 +162,7 @@ impl App {
             }
             return;
         }
-        if self.state.mode != Mode::Terminal {
-            self.paste_into_active_text_input(text);
+        if self.paste_into_active_text_input(text) {
             return;
         }
 
@@ -192,8 +191,7 @@ impl App {
             }
             return;
         }
-        if self.state.mode != Mode::Terminal {
-            self.paste_into_active_text_input(&text);
+        if self.paste_into_active_text_input(&text) {
             return;
         }
 
@@ -219,8 +217,7 @@ impl App {
             }
             return;
         }
-        if self.state.mode != Mode::Terminal {
-            self.paste_into_active_text_input(&text);
+        if self.paste_into_active_text_input(&text) {
             return;
         }
 
@@ -235,6 +232,9 @@ impl App {
     }
 
     pub(crate) fn paste_into_active_text_input(&mut self, text: &str) -> bool {
+        if self.state.island_panel_open {
+            return true;
+        }
         match self.state.mode {
             Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane => {
                 insert_rename_input_text(&mut self.state, text);
@@ -993,6 +993,22 @@ mod tests {
         assert!(app.state.island_panel_open);
         app.handle_key(toggle).await;
         assert!(!app.state.island_panel_open);
+    }
+
+    #[tokio::test]
+    async fn paste_is_consumed_while_island_panel_is_open() {
+        let mut app = test_app();
+        seed_island_record(&mut app);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let (runtime, mut input_rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.state.insert_test_runtime(pane_id, runtime);
+        app.state.set_island_panel_open(true);
+        let panel_list_before = app.state.island_panel_list;
+
+        app.handle_paste("must not leak".into()).await;
+
+        assert!(input_rx.try_recv().is_err());
+        assert_eq!(app.state.island_panel_list, panel_list_before);
     }
 
     #[tokio::test]

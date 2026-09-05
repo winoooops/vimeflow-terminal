@@ -199,7 +199,10 @@ fn desktop_tab_bar_and_terminal_area(
     ws: &crate::workspace::Workspace,
     main_area: Rect,
 ) -> (Rect, Rect) {
-    let hide_single_tab_bar = app.hide_tab_bar_when_single_tab && ws.tabs.len() == 1;
+    let island_needs_row = app.tab_bar_style == crate::config::TabBarStyleConfig::Island
+        && (!app.island_records.is_empty() || app.island_panel_open);
+    let hide_single_tab_bar =
+        app.hide_tab_bar_when_single_tab && ws.tabs.len() == 1 && !island_needs_row;
     if !hide_single_tab_bar && main_area.height > 1 {
         match app.tab_bar_position {
             crate::config::TabBarPositionConfig::Top => {
@@ -226,7 +229,6 @@ fn compute_view_internal(
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
     if is_mobile_width(area, app.mobile_width_threshold) {
-        app.set_island_panel_open(false);
         compute_mobile_view(app, terminal_runtimes, area, resize_panes, cell_size);
         return;
     }
@@ -270,9 +272,6 @@ fn compute_view_internal(
 
     let tab_bar_view = compute_tab_bar_view(app, tab_bar_rect);
     app.tab_scroll = tab_bar_view.scroll;
-    if tab_bar_view.island_bell_hit_area.width == 0 {
-        app.set_island_panel_open(false);
-    }
     let island_panel_view =
         compute_island_panel_view(app, area, tab_bar_rect, tab_bar_view.island_capsule_rect);
 
@@ -826,7 +825,7 @@ mod tests {
     }
 
     #[test]
-    fn resize_to_mobile_closes_island_panel_and_prevents_reopen() {
+    fn mobile_geometry_cannot_place_or_reopen_island_panel() {
         let mut app = crate::app::state::AppState::test_new();
         let workspace = Workspace::test_new("one");
         let pane_id = workspace.tabs[0].root_pane;
@@ -854,9 +853,11 @@ mod tests {
 
         compute_view(&mut app, Rect::new(0, 0, 44, 20));
         assert_eq!(app.view.layout, ViewLayout::Mobile);
-        assert!(!app.island_panel_open);
-        assert!(!app.wants_ascii_input());
+        assert_eq!(app.view.island_panel_hit_area, Rect::default());
+        assert!(app.island_panel_open, "layout computation is state-neutral");
 
+        app.toggle_island_panel();
+        assert!(!app.island_panel_open);
         app.toggle_island_panel();
         assert!(!app.island_panel_open);
     }
@@ -930,6 +931,47 @@ mod tests {
         assert_eq!(app.view.tab_bar_rect, Rect::default());
         assert!(app.view.island_marker_hit_areas.is_empty());
         assert_eq!(app.view.new_tab_hit_area, Rect::default());
+    }
+
+    #[test]
+    fn single_tab_island_record_keeps_the_row_and_bell_visible() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.hide_tab_bar_when_single_tab = true;
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        let workspace = Workspace::test_new("one");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert_eq!(app.view.tab_bar_rect, Rect::default());
+
+        app.push_island_record(crate::app::state::IslandRecord {
+            id: 0,
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            pane_id,
+            agent: Some(crate::detect::Agent::Codex),
+            reason: crate::app::state::IslandReason::TurnComplete,
+            text: "codex turn complete".into(),
+            at: std::time::SystemTime::UNIX_EPOCH,
+            read: false,
+        })
+        .expect("test island record id");
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert_eq!(app.view.tab_bar_rect, Rect::new(26, 0, 54, 1));
+        assert!(app.view.island_bell_hit_area.width > 0);
+
+        app.set_island_panel_open(true);
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert!(app.island_panel_open);
+        assert!(app.view.island_panel_hit_area.width > 0);
+
+        app.clear_island_records();
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert_eq!(app.view.tab_bar_rect, Rect::default());
     }
 
     #[test]

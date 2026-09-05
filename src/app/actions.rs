@@ -1035,6 +1035,7 @@ impl AppState {
         }
         self.clear_island_animation_if_bell_width_changed(previous_bell_width);
         self.focus_pane_in_workspace(ws_idx, record.pane_id);
+        self.mark_active_tab_seen();
         self.settle_terminal_mode_after_focus();
         true
     }
@@ -3812,6 +3813,11 @@ mod tests {
         let mut state = app_with_workspaces(&["first", "second"]);
         let tab_idx = state.workspaces[1].test_add_tab(Some("target"));
         let pane_id = state.workspaces[1].tabs[tab_idx].root_pane;
+        state.workspaces[1].tabs[tab_idx]
+            .panes
+            .get_mut(&pane_id)
+            .expect("target pane")
+            .seen = false;
         let record_id = state
             .push_island_record(IslandRecord {
                 id: 0,
@@ -3833,6 +3839,7 @@ mod tests {
         assert_eq!(state.workspaces[1].active_tab, tab_idx);
         assert_eq!(state.workspaces[1].focused_pane_id(), Some(pane_id));
         assert!(state.island_records[0].read);
+        assert!(state.workspaces[1].tabs[tab_idx].panes[&pane_id].seen);
         assert!(state.island_panel_open);
         assert_eq!(state.mode, Mode::Terminal);
     }
