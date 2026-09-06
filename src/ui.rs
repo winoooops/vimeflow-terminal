@@ -29,6 +29,7 @@ use self::dialogs::{
     render_open_existing_worktree_overlay, render_remove_worktree_overlay, render_rename_overlay,
 };
 pub(crate) use self::island::island_animation_for_tab_change;
+use self::island::{compute_island_panel_view, render_island_panel};
 use self::keybind_help::render_keybind_help_overlay;
 use self::menus::{
     render_context_menu, render_copy_mode_overlay, render_global_launcher_menu,
@@ -198,7 +199,10 @@ fn desktop_tab_bar_and_terminal_area(
     ws: &crate::workspace::Workspace,
     main_area: Rect,
 ) -> (Rect, Rect) {
-    let hide_single_tab_bar = app.hide_tab_bar_when_single_tab && ws.tabs.len() == 1;
+    let island_needs_row = app.tab_bar_style == crate::config::TabBarStyleConfig::Island
+        && (!app.island_records.is_empty() || app.island_panel_open);
+    let hide_single_tab_bar =
+        app.hide_tab_bar_when_single_tab && ws.tabs.len() == 1 && !island_needs_row;
     if !hide_single_tab_bar && main_area.height > 1 {
         match app.tab_bar_position {
             crate::config::TabBarPositionConfig::Top => {
@@ -268,6 +272,8 @@ fn compute_view_internal(
 
     let tab_bar_view = compute_tab_bar_view(app, tab_bar_rect);
     app.tab_scroll = tab_bar_view.scroll;
+    let island_panel_view =
+        compute_island_panel_view(app, area, tab_bar_rect, tab_bar_view.island_capsule_rect);
 
     let TabSurfaceLayout {
         pane_infos,
@@ -305,6 +311,8 @@ fn compute_view_internal(
         tab_hit_areas: tab_bar_view.tab_hit_areas,
         island_marker_hit_areas: tab_bar_view.island_marker_hit_areas,
         island_bell_hit_area: tab_bar_view.island_bell_hit_area,
+        island_panel_hit_area: island_panel_view.rect,
+        island_panel_record_hit_areas: island_panel_view.record_hit_areas,
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
         new_tab_hit_area: tab_bar_view.new_tab_hit_area,
@@ -370,6 +378,8 @@ fn compute_mobile_view(
         tab_hit_areas: Vec::new(),
         island_marker_hit_areas: Vec::new(),
         island_bell_hit_area: Rect::default(),
+        island_panel_hit_area: Rect::default(),
+        island_panel_record_hit_areas: Vec::new(),
         tab_scroll_left_hit_area: Rect::default(),
         tab_scroll_right_hit_area: Rect::default(),
         new_tab_hit_area: Rect::default(),
@@ -455,6 +465,9 @@ pub fn render_with_runtime_registry(
         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
         Mode::Terminal => {}
+    }
+    if app.island_panel_open {
+        render_island_panel(app, frame);
     }
 }
 
@@ -611,6 +624,7 @@ mod tests {
             context: "workspace · 1".into(),
             position: None,
             target: None,
+            island_record_id: None,
         };
 
         let bottom_right_toast = toast_notification_rect(
@@ -757,6 +771,7 @@ mod tests {
             context: "one".into(),
             position: None,
             target: None,
+            island_record_id: None,
         });
 
         compute_view(&mut app, Rect::new(0, 0, 100, 20));
@@ -782,6 +797,7 @@ mod tests {
             context: "one".into(),
             position: None,
             target: None,
+            island_record_id: None,
         });
 
         compute_view(&mut app, Rect::new(0, 0, 100, 20));
@@ -806,6 +822,44 @@ mod tests {
         assert_eq!(app.view.layout, ViewLayout::Mobile);
         assert_eq!(app.view.mobile_header_rect, Rect::new(0, 0, 80, 2));
         assert_eq!(app.view.terminal_area, Rect::new(0, 2, 80, 18));
+    }
+
+    #[test]
+    fn mobile_geometry_cannot_place_or_reopen_island_panel() {
+        let mut app = crate::app::state::AppState::test_new();
+        let workspace = Workspace::test_new("one");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+        app.push_island_record(crate::app::state::IslandRecord {
+            id: 0,
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            pane_id,
+            agent: Some(crate::detect::Agent::Codex),
+            reason: crate::app::state::IslandReason::TurnComplete,
+            text: "codex turn complete".into(),
+            at: std::time::SystemTime::UNIX_EPOCH,
+            read: false,
+        })
+        .expect("test island record id");
+
+        compute_view(&mut app, Rect::new(0, 0, 100, 20));
+        app.set_island_panel_open(true);
+        assert!(app.island_panel_open);
+        assert!(app.wants_ascii_input());
+
+        compute_view(&mut app, Rect::new(0, 0, 44, 20));
+        assert_eq!(app.view.layout, ViewLayout::Mobile);
+        assert_eq!(app.view.island_panel_hit_area, Rect::default());
+        assert!(app.island_panel_open, "layout computation is state-neutral");
+
+        app.toggle_island_panel();
+        assert!(!app.island_panel_open);
+        app.toggle_island_panel();
+        assert!(!app.island_panel_open);
     }
 
     #[test]
@@ -877,6 +931,47 @@ mod tests {
         assert_eq!(app.view.tab_bar_rect, Rect::default());
         assert!(app.view.island_marker_hit_areas.is_empty());
         assert_eq!(app.view.new_tab_hit_area, Rect::default());
+    }
+
+    #[test]
+    fn single_tab_island_record_keeps_the_row_and_bell_visible() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.hide_tab_bar_when_single_tab = true;
+        app.tab_bar_style = crate::config::TabBarStyleConfig::Island;
+        let workspace = Workspace::test_new("one");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert_eq!(app.view.tab_bar_rect, Rect::default());
+
+        app.push_island_record(crate::app::state::IslandRecord {
+            id: 0,
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            pane_id,
+            agent: Some(crate::detect::Agent::Codex),
+            reason: crate::app::state::IslandReason::TurnComplete,
+            text: "codex turn complete".into(),
+            at: std::time::SystemTime::UNIX_EPOCH,
+            read: false,
+        })
+        .expect("test island record id");
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert_eq!(app.view.tab_bar_rect, Rect::new(26, 0, 54, 1));
+        assert!(app.view.island_bell_hit_area.width > 0);
+
+        app.set_island_panel_open(true);
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert!(app.island_panel_open);
+        assert!(app.view.island_panel_hit_area.width > 0);
+
+        app.clear_island_records();
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert_eq!(app.view.tab_bar_rect, Rect::default());
     }
 
     #[test]

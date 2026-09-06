@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -235,6 +237,7 @@ mod tests {
             context: "workspace".to_string(),
             position: None,
             target: None,
+            island_record_id: None,
         }
     }
 
@@ -293,6 +296,7 @@ mod tests {
             context: "提交 herdr 的反馈".to_string(),
             position: None,
             target: None,
+            island_record_id: None,
         };
 
         let rect = toast_notification_rect(area, &toast, false, ToastHerdrPosition::TopRight);

@@ -1,14 +1,15 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
-    widgets::Paragraph,
+    style::{Color, Modifier, Style},
+    text::Line,
+    widgets::{List, ListItem, ListState, Paragraph},
     Frame,
 };
 
 use super::tabs::TabBarView;
 use super::text::{display_width, display_width_u16, truncate_end};
-use super::widgets::panel_contrast_fg;
-use crate::app::state::{AppState, IslandAnim, IslandSpring};
+use super::widgets::{panel_contrast_fg, render_panel_shell};
+use crate::app::state::{AppState, IslandAnim, IslandSpring, IslandStage};
 use crate::config::{
     IslandCapsConfig, IslandDisplayConfig, IslandMotionConfig, IslandPositionConfig,
 };
@@ -238,6 +239,7 @@ struct IslandLayout {
     capsule: Rect,
     indicator: Option<(Rect, String)>,
     markers: Vec<MarkerLayout>,
+    bell: Option<(Rect, String)>,
 }
 
 struct AnimatedIslandLayout {
@@ -318,9 +320,10 @@ fn page_plan(
     display: IslandDisplayConfig,
     caps: IslandCapsConfig,
     active_title: bool,
+    bell_addon_width: usize,
 ) -> PagePlan {
     let marker_width = marker_budget(display, tab_count, caps, active_title);
-    let fixed_width = 2 * CAPSULE_PADDING_BUDGET + caps_width(caps);
+    let fixed_width = 2 * CAPSULE_PADDING_BUDGET + caps_width(caps) + bell_addon_width;
     if tab_count <= MAX_PAGE_SIZE
         && fixed_width.saturating_add(markers_width(tab_count, marker_width)) <= area_width
     {
@@ -502,6 +505,10 @@ fn layout_for_display_active(
         return None;
     }
 
+    let bell_text = app.island_bell_text();
+    let bell_addon_width = bell_text.as_deref().map_or(0, |text| {
+        MARKER_GAP + display_width(text) + caps_width(app.island.caps)
+    });
     let page = page_plan(
         ws.tabs.len(),
         active_tab,
@@ -509,6 +516,7 @@ fn layout_for_display_active(
         display,
         app.island.caps,
         active_title,
+        bell_addon_width,
     );
     let page_end = (page.start + page.page_size).min(ws.tabs.len());
     let candidate_layout = |candidate_active, active_title_budget| {
@@ -578,25 +586,22 @@ fn layout_for_display_active(
     let (
         active_title_budget,
         (marker_texts, left_padding, _right_padding, content_width),
-        capsule_width,
+        base_capsule_width,
     ) = (minimum_title_budget..=maximum_title_budget)
         .rev()
         .chain(std::iter::once(0))
         .find_map(|active_title_budget| {
             let current = candidate_layout(active_tab, active_title_budget);
-            let capsule_width = (page.start..page_end)
+            let base_capsule_width = (page.start..page_end)
                 .filter(|candidate_active| *candidate_active != active_tab)
                 .map(|candidate_active| candidate_layout(candidate_active, active_title_budget).3)
                 .fold(current.3, usize::max);
-            (capsule_width <= usize::from(area.width)).then_some((
-                active_title_budget,
-                current,
-                capsule_width,
-            ))
+            (base_capsule_width.saturating_add(bell_addon_width) <= usize::from(area.width))
+                .then_some((active_title_budget, current, base_capsule_width))
         })?;
 
-    let content_offset = (capsule_width - content_width) / 2;
-    let capsule_width = capsule_width as u16;
+    let content_offset = (base_capsule_width - content_width) / 2;
+    let capsule_width = base_capsule_width.saturating_add(bell_addon_width) as u16;
     let capsule_x = match app.island.position {
         IslandPositionConfig::Center => area.x + area.width.saturating_sub(capsule_width) / 2,
         IslandPositionConfig::Left => area.x,
@@ -632,6 +637,22 @@ fn layout_for_display_active(
             text,
         });
     }
+    let bell = bell_text.map(|text| {
+        let width = display_width_u16(&text) + u16::from(round_caps) * 2;
+        let outer_cap_width = u16::from(round_caps);
+        let trailing_padding = capsule_padding(app.island.caps, round_caps) as u16;
+        (
+            Rect::new(
+                capsule
+                    .right()
+                    .saturating_sub(outer_cap_width + trailing_padding + width),
+                area.y,
+                width,
+                1,
+            ),
+            text,
+        )
+    });
 
     Some(IslandLayout {
         display,
@@ -639,6 +660,7 @@ fn layout_for_display_active(
         capsule,
         indicator,
         markers,
+        bell,
     })
 }
 
@@ -919,8 +941,195 @@ pub(super) fn compute_tab_bar_view(app: &AppState, area: Rect) -> TabBarView {
 
     TabBarView {
         island_marker_hit_areas: marker_hit_areas,
+        island_bell_hit_area: layout
+            .bell
+            .as_ref()
+            .map_or(Rect::default(), |(rect, _)| *rect),
+        island_capsule_rect: layout.capsule,
         ..TabBarView::default()
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct IslandPanelView {
+    pub(crate) rect: Rect,
+    pub(crate) record_hit_areas: Vec<(u64, Rect)>,
+}
+
+fn island_panel_visible_start(selected: usize, item_count: usize, visible_rows: usize) -> usize {
+    selected
+        .saturating_sub(visible_rows.saturating_sub(1))
+        .min(item_count.saturating_sub(visible_rows))
+}
+
+pub(crate) fn compute_island_panel_view(
+    app: &AppState,
+    screen: Rect,
+    tab_bar: Rect,
+    capsule: Rect,
+) -> IslandPanelView {
+    if app.island_stage() != IslandStage::Panel
+        || app.tab_bar_style != crate::config::TabBarStyleConfig::Island
+        || tab_bar.width <= 4
+        || capsule.width == 0
+    {
+        return IslandPanelView::default();
+    }
+
+    let available_height = match app.tab_bar_position {
+        crate::config::TabBarPositionConfig::Top => {
+            screen.bottom().saturating_sub(tab_bar.bottom())
+        }
+        crate::config::TabBarPositionConfig::Bottom => tab_bar.y.saturating_sub(screen.y),
+    };
+    let visible_rows = app
+        .island_records
+        .len()
+        .min(6)
+        .min(usize::from(available_height.saturating_sub(3)));
+    if visible_rows == 0 {
+        return IslandPanelView::default();
+    }
+
+    let width = 48.min(tab_bar.width.saturating_sub(4));
+    if width < 3 {
+        return IslandPanelView::default();
+    }
+    let height = visible_rows as u16 + 3;
+    let center_twice = capsule.x.saturating_mul(2).saturating_add(capsule.width);
+    let desired_x = center_twice.saturating_sub(width) / 2;
+    let min_x = tab_bar.x.saturating_add(2);
+    let max_x = tab_bar.right().saturating_sub(2 + width);
+    let x = desired_x.clamp(min_x, max_x);
+    let y = match app.tab_bar_position {
+        crate::config::TabBarPositionConfig::Top => tab_bar.bottom(),
+        crate::config::TabBarPositionConfig::Bottom => tab_bar.y.saturating_sub(height),
+    };
+    let rect = Rect::new(x, y, width, height);
+    let selected = app
+        .island_panel_list
+        .highlighted
+        .min(app.island_records.len().saturating_sub(1));
+    let start = island_panel_visible_start(selected, app.island_records.len(), visible_rows);
+    let record_hit_areas = app
+        .island_records
+        .iter()
+        .skip(start)
+        .take(visible_rows)
+        .enumerate()
+        .map(|(row, record)| {
+            (
+                record.id,
+                Rect::new(
+                    rect.x + 1,
+                    rect.y + 2 + row as u16,
+                    rect.width.saturating_sub(2),
+                    1,
+                ),
+            )
+        })
+        .collect();
+    IslandPanelView {
+        rect,
+        record_hit_areas,
+    }
+}
+
+fn island_record_age(at: std::time::SystemTime, now: std::time::SystemTime) -> String {
+    let seconds = now.duration_since(at).unwrap_or_default().as_secs();
+    if seconds < 60 {
+        "now".to_string()
+    } else if seconds < 60 * 60 {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{}h", seconds / (60 * 60))
+    }
+}
+
+pub(super) fn render_island_panel(app: &AppState, frame: &mut Frame) {
+    let rect = app.view.island_panel_hit_area;
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+    let Some(inner) = render_panel_shell(frame, rect, app.palette.accent, app.palette.panel_bg)
+    else {
+        return;
+    };
+
+    let unread = app
+        .island_records
+        .iter()
+        .filter(|record| !record.read)
+        .count();
+    frame.render_widget(
+        Paragraph::new(format!("{unread} unread · [r]read · [c]clear")).style(
+            Style::default()
+                .fg(app.palette.overlay0)
+                .bg(app.palette.panel_bg),
+        ),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    let now = std::time::SystemTime::now();
+    let items = app
+        .view
+        .island_panel_record_hit_areas
+        .iter()
+        .filter_map(|(record_id, _)| {
+            let record = app
+                .island_records
+                .iter()
+                .find(|record| record.id == *record_id)?;
+            let text = truncate_end(
+                &format!(
+                    "● {} · {} · {}",
+                    record.text,
+                    record.tab_id,
+                    island_record_age(record.at, now)
+                ),
+                usize::from(inner.width),
+            );
+            let style = if record.read {
+                Style::default()
+                    .fg(app.palette.overlay0)
+                    .bg(app.palette.panel_bg)
+                    .add_modifier(Modifier::DIM)
+            } else {
+                Style::default()
+                    .fg(app.palette.text)
+                    .bg(app.palette.panel_bg)
+            };
+            Some(ListItem::new(Line::from(text)).style(style))
+        })
+        .collect::<Vec<_>>();
+    let selected = app
+        .island_records
+        .get(app.island_panel_list.highlighted)
+        .and_then(|record| {
+            app.view
+                .island_panel_record_hit_areas
+                .iter()
+                .position(|(record_id, _)| *record_id == record.id)
+        });
+    let list = List::new(items)
+        .highlight_style(
+            Style::default()
+                .fg(panel_contrast_fg(&app.palette))
+                .bg(app.palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("");
+    let mut state = ListState::default().with_selected(selected);
+    frame.render_stateful_widget(
+        list,
+        Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
+        ),
+        &mut state,
+    );
 }
 
 fn positional_fg(app: &AppState, tab_idx: usize, active_tab: usize) -> Color {
@@ -928,6 +1137,51 @@ fn positional_fg(app: &AppState, tab_idx: usize, active_tab: usize) -> Color {
         app.palette.overlay1
     } else {
         app.palette.overlay0
+    }
+}
+
+fn render_muted_stadium(
+    app: &AppState,
+    frame: &mut Frame,
+    rect: Rect,
+    text_rect: Rect,
+    text: &str,
+    fg: Color,
+) {
+    let p = &app.palette;
+    frame.render_widget(
+        Paragraph::new(text).style(Style::default().fg(fg).bg(p.surface1)),
+        text_rect,
+    );
+    let cap_style = Style::default().fg(p.surface1).bg(p.surface0);
+    frame.buffer_mut()[(rect.x, rect.y)]
+        .set_symbol(LEFT_CAP)
+        .set_style(cap_style);
+    frame.buffer_mut()[(rect.right() - 1, rect.y)]
+        .set_symbol(RIGHT_CAP)
+        .set_style(cap_style);
+}
+
+fn render_bell(app: &AppState, frame: &mut Frame, rect: Rect, text: &str) {
+    let fg = if app.island_records.iter().any(|record| !record.read) {
+        app.palette.accent
+    } else {
+        app.palette.overlay0
+    };
+    if app.island.caps == IslandCapsConfig::Round {
+        render_muted_stadium(
+            app,
+            frame,
+            rect,
+            Rect::new(rect.x + 1, rect.y, rect.width - 2, 1),
+            text,
+            fg,
+        );
+    } else {
+        frame.render_widget(
+            Paragraph::new(text).style(Style::default().fg(fg).bg(app.palette.surface0)),
+            rect,
+        );
     }
 }
 
@@ -989,19 +1243,22 @@ fn render_settled_layout(
                     p.surface0
                 })
         };
+        if inactive_number_stadium {
+            render_muted_stadium(
+                app,
+                frame,
+                marker.rect,
+                marker.rect,
+                marker.text.as_str(),
+                positional_fg(app, marker.tab_idx, active_tab),
+            );
+            continue;
+        }
         frame.render_widget(
             Paragraph::new(marker.text.as_str()).style(style),
             marker.rect,
         );
-        if inactive_number_stadium {
-            let cap_style = Style::default().fg(p.surface1).bg(p.surface0);
-            frame.buffer_mut()[(marker.rect.x, marker.rect.y)]
-                .set_symbol(LEFT_CAP)
-                .set_style(cap_style);
-            frame.buffer_mut()[(marker.rect.right() - 1, marker.rect.y)]
-                .set_symbol(RIGHT_CAP)
-                .set_style(cap_style);
-        } else if active && round_caps {
+        if active && round_caps {
             let cap_style = Style::default().fg(p.accent).bg(p.surface0);
             frame.buffer_mut()[(marker.rect.x - 1, marker.rect.y)]
                 .set_symbol(LEFT_CAP)
@@ -1010,6 +1267,9 @@ fn render_settled_layout(
                 .set_symbol(RIGHT_CAP)
                 .set_style(cap_style);
         }
+    }
+    if let Some((rect, text)) = &layout.bell {
+        render_bell(app, frame, *rect, text);
     }
 }
 
@@ -1195,22 +1455,24 @@ fn render_animated_layout(
             p.surface0
         };
         let rect = Rect::new(x, area.y, to.rect.width, 1);
-        frame.render_widget(
-            Paragraph::new(to.text.as_str()).style(
-                Style::default()
-                    .fg(positional_fg(app, to.tab_idx, anim.to_tab))
-                    .bg(bg),
-            ),
-            rect,
-        );
         if inactive_number_stadium {
-            let cap_style = Style::default().fg(p.surface1).bg(p.surface0);
-            frame.buffer_mut()[(rect.x, rect.y)]
-                .set_symbol(LEFT_CAP)
-                .set_style(cap_style);
-            frame.buffer_mut()[(rect.right() - 1, rect.y)]
-                .set_symbol(RIGHT_CAP)
-                .set_style(cap_style);
+            render_muted_stadium(
+                app,
+                frame,
+                rect,
+                rect,
+                to.text.as_str(),
+                positional_fg(app, to.tab_idx, anim.to_tab),
+            );
+        } else {
+            frame.render_widget(
+                Paragraph::new(to.text.as_str()).style(
+                    Style::default()
+                        .fg(positional_fg(app, to.tab_idx, anim.to_tab))
+                        .bg(bg),
+                ),
+                rect,
+            );
         }
     }
 
@@ -1331,6 +1593,9 @@ fn render_animated_layout(
             incoming_fill,
         );
     }
+    if let Some((rect, text)) = &animated.to.bell {
+        render_bell(app, frame, *rect, text);
+    }
 }
 
 pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
@@ -1378,7 +1643,8 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::state::{AppState, IslandAnim};
+    use crate::app::state::{AppState, IslandAnim, IslandReason, IslandRecord};
+    use crate::layout::PaneId;
     use crate::workspace::Workspace;
     use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
 
@@ -1395,6 +1661,62 @@ mod tests {
         app
     }
 
+    fn push_bell_record(app: &mut AppState, raw_pane_id: u32) {
+        app.push_island_record(IslandRecord {
+            id: 0,
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            pane_id: PaneId::from_raw(raw_pane_id),
+            agent: Some(crate::detect::Agent::Codex),
+            reason: IslandReason::TurnComplete,
+            text: "codex turn complete".into(),
+            at: std::time::SystemTime::UNIX_EPOCH,
+            read: false,
+        })
+        .expect("test island record id");
+    }
+
+    fn push_panel_record(
+        app: &mut AppState,
+        raw_pane_id: u32,
+        reason: IslandReason,
+        text: &str,
+        age: std::time::Duration,
+    ) -> u64 {
+        app.push_island_record(IslandRecord {
+            id: 0,
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            pane_id: PaneId::from_raw(raw_pane_id),
+            agent: Some(crate::detect::Agent::Codex),
+            reason,
+            text: text.into(),
+            at: std::time::SystemTime::now()
+                .checked_sub(age)
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+            read: false,
+        })
+        .expect("test island record id")
+    }
+
+    fn prepare_panel_view(app: &mut AppState, screen: Rect, tab_bar: Rect) -> IslandPanelView {
+        app.set_island_panel_open(true);
+        let tab_view = compute_tab_bar_view(app, tab_bar);
+        let panel = compute_island_panel_view(app, screen, tab_bar, tab_view.island_capsule_rect);
+        app.view.island_panel_hit_area = panel.rect;
+        app.view.island_panel_record_hit_areas = panel.record_hit_areas.clone();
+        panel
+    }
+
+    fn rendered_panel_buffer(app: &AppState, screen: Rect) -> Buffer {
+        let backend = TestBackend::new(screen.width, screen.height);
+        let mut terminal = Terminal::new(backend).expect("panel test terminal");
+        terminal
+            .draw(|frame| render_island_panel(app, frame))
+            .expect("draw island panel");
+        terminal.backend().buffer().clone()
+    }
+
     fn rect_text(buffer: &Buffer, rect: Rect) -> String {
         (rect.x..rect.x + rect.width)
             .map(|x| buffer[(x, rect.y)].symbol())
@@ -1408,6 +1730,110 @@ mod tests {
             .draw(|frame| render_tab_bar(app, frame, area))
             .expect("draw island");
         terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn panel_renders_header_rows_ages_and_dim_read_state() {
+        let screen = Rect::new(0, 0, 80, 20);
+        let tab_bar = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(2, 0);
+        let read_id = push_panel_record(
+            &mut app,
+            70,
+            IslandReason::TurnComplete,
+            "codex turn complete",
+            std::time::Duration::from_secs(2 * 60 * 60),
+        );
+        push_panel_record(
+            &mut app,
+            71,
+            IslandReason::Blocked,
+            "codex blocked",
+            std::time::Duration::from_secs(5 * 60),
+        );
+        app.island_records
+            .iter_mut()
+            .find(|record| record.id == read_id)
+            .expect("read record")
+            .read = true;
+        let panel = prepare_panel_view(&mut app, screen, tab_bar);
+
+        let buffer = rendered_panel_buffer(&app, screen);
+        let header = rect_text(
+            &buffer,
+            Rect::new(panel.rect.x + 1, panel.rect.y + 1, panel.rect.width - 2, 1),
+        );
+        assert!(header.starts_with("1 unread · [r]read · [c]clear"));
+        let first = panel.record_hit_areas[0].1;
+        let second = panel.record_hit_areas[1].1;
+        assert!(rect_text(&buffer, first).starts_with("● codex blocked · w1:t1 · 5m"));
+        assert!(rect_text(&buffer, second).starts_with("● codex turn complete · w1:t1 · 2h"));
+        assert!(buffer[(second.x, second.y)]
+            .style()
+            .add_modifier
+            .contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn panel_opens_toward_panes_and_scrolls_to_six_rows() {
+        let screen = Rect::new(0, 0, 80, 20);
+        for position in [
+            crate::config::TabBarPositionConfig::Top,
+            crate::config::TabBarPositionConfig::Bottom,
+        ] {
+            let mut app = app_with_tabs(2, 0);
+            app.tab_bar_position = position;
+            for raw in 1..=8 {
+                push_panel_record(
+                    &mut app,
+                    raw,
+                    IslandReason::TurnComplete,
+                    &format!("record {raw}"),
+                    std::time::Duration::ZERO,
+                );
+            }
+            app.island_panel_list.highlighted = 7;
+            let tab_bar = Rect::new(
+                0,
+                if position == crate::config::TabBarPositionConfig::Top {
+                    0
+                } else {
+                    19
+                },
+                80,
+                1,
+            );
+            let panel = prepare_panel_view(&mut app, screen, tab_bar);
+            let capsule = compute_tab_bar_view(&app, tab_bar).island_capsule_rect;
+
+            assert_eq!(panel.rect.width, 48);
+            assert_eq!(panel.record_hit_areas.len(), 6);
+            assert_eq!(
+                panel.rect.y,
+                if position == crate::config::TabBarPositionConfig::Top {
+                    tab_bar.bottom()
+                } else {
+                    tab_bar.y - panel.rect.height
+                }
+            );
+            assert!(
+                panel.rect.x.saturating_mul(2).abs_diff(
+                    capsule
+                        .x
+                        .saturating_mul(2)
+                        .saturating_add(capsule.width)
+                        .saturating_sub(panel.rect.width)
+                ) <= 1
+            );
+            assert_eq!(panel.record_hit_areas.last().map(|(id, _)| *id), Some(1));
+            let buffer = rendered_panel_buffer(&app, screen);
+            assert_eq!(buffer[(panel.rect.x, panel.rect.y)].symbol(), "┌");
+            assert_eq!(
+                buffer[(panel.rect.right() - 1, panel.rect.bottom() - 1)].symbol(),
+                "┘"
+            );
+            assert!(rect_text(&buffer, panel.record_hit_areas[0].1).starts_with("● record 6"));
+        }
     }
 
     fn rendered_animated_content_buffer(
@@ -1605,7 +2031,7 @@ mod tests {
 
         assert!(app.island_anim.is_none());
         let mut settled = app_with_tabs(3, 2);
-        settled.island = app.island;
+        settled.island = app.island.clone();
         assert_eq!(rendered_buffer(&app, area), rendered_buffer(&settled, area));
     }
 
@@ -2436,6 +2862,195 @@ mod tests {
     }
 
     #[test]
+    fn bell_composes_unread_count_cap_override_and_tints() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(2, 1);
+        push_bell_record(&mut app, 1);
+
+        let bell_layout = layout(&app, area).expect("belled island");
+        let (bell_rect, bell_text) = bell_layout.bell.as_ref().expect("bell layout");
+        assert_eq!(bell_text, "🔔1");
+        assert_eq!(bell_rect.width, 5);
+        assert_eq!(bell_rect.right(), bell_layout.capsule.right() - 1);
+        let last_marker = bell_layout.markers.last().expect("last marker");
+        assert_eq!(
+            bell_rect.x - (last_marker.rect.right() + 1),
+            MARKER_GAP as u16
+        );
+        assert_eq!(
+            compute_tab_bar_view(&app, area).island_bell_hit_area,
+            *bell_rect
+        );
+        let unread = rendered_buffer(&app, area);
+        assert_eq!(unread[(bell_rect.x, bell_rect.y)].symbol(), LEFT_CAP);
+        assert_eq!(unread[(bell_rect.x + 1, bell_rect.y)].symbol(), "🔔");
+        assert_eq!(unread[(bell_rect.right() - 2, bell_rect.y)].symbol(), "1");
+        assert_eq!(
+            unread[(bell_rect.right() - 1, bell_rect.y)].symbol(),
+            RIGHT_CAP
+        );
+        for x in [bell_rect.x + 1, bell_rect.right() - 2] {
+            assert_eq!(
+                unread[(x, bell_rect.y)].style().fg,
+                Some(app.palette.accent)
+            );
+        }
+        for x in [bell_rect.x, bell_rect.right() - 1] {
+            assert_eq!(
+                unread[(x, bell_rect.y)].style().fg,
+                Some(app.palette.surface1)
+            );
+            assert_eq!(
+                unread[(x, bell_rect.y)].style().bg,
+                Some(app.palette.surface0)
+            );
+        }
+
+        app.island_records.front_mut().expect("bell record").read = true;
+        let read_layout = layout(&app, area).expect("read bell island");
+        let (read_rect, read_text) = read_layout.bell.as_ref().expect("read bell layout");
+        assert_eq!(read_text, "🔔0");
+        let read = rendered_buffer(&app, area);
+        for x in [read_rect.x + 1, read_rect.right() - 2] {
+            assert_eq!(
+                read[(x, read_rect.y)].style().fg,
+                Some(app.palette.overlay0)
+            );
+        }
+
+        let mut capped = app_with_tabs(2, 0);
+        for raw in 1..=10 {
+            push_bell_record(&mut capped, raw);
+        }
+        capped.island.bell = "界".to_string();
+        let capped_layout = layout(&capped, area).expect("capped bell island");
+        let (capped_rect, capped_text) = capped_layout.bell.as_ref().expect("capped bell layout");
+        assert_eq!(capped_text, "界9+");
+        assert_eq!(capped_rect.width, 6);
+    }
+
+    #[test]
+    fn square_bell_is_bare_with_the_standard_gap() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(2, 0);
+        app.island.caps = IslandCapsConfig::Square;
+        push_bell_record(&mut app, 1);
+
+        let bell_layout = layout(&app, area).expect("square belled island");
+        let (bell_rect, bell_text) = bell_layout.bell.as_ref().expect("bell layout");
+        assert_eq!(bell_text, "🔔1");
+        assert_eq!(bell_rect.width, 3);
+        assert_eq!(bell_rect.right() + 1, bell_layout.capsule.right());
+        assert_eq!(
+            bell_rect.x
+                - bell_layout
+                    .markers
+                    .last()
+                    .expect("last marker")
+                    .rect
+                    .right(),
+            MARKER_GAP as u16
+        );
+
+        let buffer = rendered_buffer(&app, area);
+        assert_eq!(buffer[(bell_rect.x, bell_rect.y)].symbol(), "🔔");
+        assert_eq!(buffer[(bell_rect.x + 2, bell_rect.y)].symbol(), "1");
+    }
+
+    #[test]
+    fn default_bell_renders_two_cell_glyph_plus_count() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(2, 0);
+        push_bell_record(&mut app, 1);
+
+        let bell_layout = layout(&app, area).expect("belled island");
+        let (bell_rect, bell_text) = bell_layout.bell.as_ref().expect("bell layout");
+        assert_eq!(bell_text, "🔔1");
+        assert_eq!(display_width("🔔"), 2);
+        assert_eq!(bell_rect.width, 5);
+
+        let buffer = rendered_buffer(&app, area);
+        assert_eq!(buffer[(bell_rect.x + 1, bell_rect.y)].symbol(), "🔔");
+        assert_eq!(buffer[(bell_rect.x + 3, bell_rect.y)].symbol(), "1");
+
+        for raw in 2..=10 {
+            push_bell_record(&mut app, raw);
+        }
+        let capped = layout(&app, area).expect("capped belled island");
+        let (capped_rect, capped_text) = capped.bell.as_ref().expect("capped bell layout");
+        assert_eq!(capped_text, "🔔9+");
+        assert_eq!(capped_rect.width, 6);
+    }
+
+    #[test]
+    fn bell_width_joins_the_reserve_and_page_fixed_term() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(4, 0);
+        let plain = layout(&app, area).expect("plain island");
+        assert!(plain.bell.is_none());
+        assert_eq!(
+            compute_tab_bar_view(&app, area).island_bell_hit_area,
+            Rect::default()
+        );
+
+        push_bell_record(&mut app, 1);
+        let belled = layout(&app, area).expect("belled island");
+        let bell_rect = belled.bell.as_ref().expect("bell layout").0;
+        assert_eq!(
+            belled.capsule.width,
+            plain.capsule.width + MARKER_GAP as u16 + bell_rect.width
+        );
+        assert_eq!(
+            compute_tab_bar_view(&app, area).island_bell_hit_area,
+            bell_rect
+        );
+
+        let without_bell = page_plan(
+            5,
+            0,
+            34,
+            IslandDisplayConfig::Dots,
+            IslandCapsConfig::Round,
+            false,
+            0,
+        );
+        let with_bell = page_plan(
+            5,
+            0,
+            34,
+            IslandDisplayConfig::Dots,
+            IslandCapsConfig::Round,
+            false,
+            6,
+        );
+        assert_eq!(without_bell.page_size, 5);
+        assert_eq!(with_bell.page_size, 3);
+    }
+
+    #[test]
+    fn animated_layout_keeps_the_bell_on_the_fixed_trailing_edge() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut app = app_with_tabs(2, 1);
+        push_bell_record(&mut app, 1);
+        app.island_anim = island_animation_for_tab_change(&app, area, 0, 1);
+        set_spring_frame(&mut app, 3.0, 3.0, 6.0, 0.0, 0.0);
+
+        let animated = layout_animated(&app, area).expect("animated belled layout");
+        assert_eq!(animated.from.bell, animated.to.bell);
+        let (bell_rect, bell_text) = animated.to.bell.as_ref().expect("animated bell");
+        assert_eq!(bell_rect.right(), animated.to.capsule.right() - 1);
+        assert_eq!(bell_text, "🔔1");
+        assert_eq!(bell_rect.width, 5);
+        let buffer = rendered_buffer(&app, area);
+        assert_eq!(buffer[(bell_rect.x, bell_rect.y)].symbol(), LEFT_CAP);
+        assert_eq!(buffer[(bell_rect.x + 1, bell_rect.y)].symbol(), "🔔");
+        assert_eq!(
+            buffer[(bell_rect.x + 1, bell_rect.y)].style().fg,
+            Some(app.palette.accent)
+        );
+    }
+
+    #[test]
     fn square_caps_preserve_flat_rendering() {
         let area = Rect::new(0, 0, 40, 1);
         let mut app = app_with_tabs(4, 1);
@@ -2813,6 +3428,7 @@ mod tests {
             IslandDisplayConfig::Dots,
             IslandCapsConfig::Round,
             false,
+            0,
         );
         let same_page = page_plan(
             11,
@@ -2821,6 +3437,7 @@ mod tests {
             IslandDisplayConfig::Dots,
             IslandCapsConfig::Round,
             false,
+            0,
         );
         assert_eq!(first.page_size, 8);
         assert_eq!(first.start, 0);
@@ -2834,6 +3451,7 @@ mod tests {
             IslandDisplayConfig::Dots,
             IslandCapsConfig::Round,
             false,
+            0,
         );
         assert_eq!(next.start, 8);
         assert_eq!(next.total_pages, 2);

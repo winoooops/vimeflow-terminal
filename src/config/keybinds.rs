@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 #[cfg(test)]
 use crossterm::event::KeyEvent;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -319,6 +320,7 @@ pub struct Keybinds {
     pub detach: ActionKeybinds,
     pub reload_config: ActionKeybinds,
     pub open_notification_target: ActionKeybinds,
+    pub island_panel_toggle: ActionKeybinds,
     pub previous_workspace: ActionKeybinds,
     pub next_workspace: ActionKeybinds,
     pub previous_agent: ActionKeybinds,
@@ -481,6 +483,7 @@ impl Config {
             detach: empty_action!(),
             reload_config: empty_action!(),
             open_notification_target: empty_action!(),
+            island_panel_toggle: empty_action!(),
             previous_workspace: empty_action!(),
             next_workspace: empty_action!(),
             previous_agent: empty_action!(),
@@ -607,6 +610,7 @@ impl Config {
                 open_notification_target,
                 source
             );
+            apply_action!(keybinds.island_panel_toggle, island_panel_toggle, source);
             apply_action!(keybinds.previous_workspace, previous_workspace, source);
             apply_action!(keybinds.next_workspace, next_workspace, source);
             apply_action!(keybinds.previous_agent, previous_agent, source);
@@ -2069,6 +2073,13 @@ switch_tab = "prefix+?"
     fn default_keymap_is_prefix_first_and_tab_centered() {
         let kb = Config::default().keybinds();
         assert_eq!(
+            binding_triggers(&kb.island_panel_toggle),
+            vec![BindingTrigger::Prefix((
+                KeyCode::Char('i'),
+                KeyModifiers::empty()
+            ))]
+        );
+        assert_eq!(
             binding_triggers(&kb.next_tab),
             vec![BindingTrigger::Prefix((
                 KeyCode::Char('n'),
@@ -2118,6 +2129,25 @@ switch_tab = "prefix+?"
             vec![BindingTrigger::Prefix((
                 KeyCode::Char('l'),
                 KeyModifiers::SHIFT
+            ))]
+        );
+    }
+
+    #[test]
+    fn island_panel_toggle_is_rebindable() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+island_panel_toggle = "ctrl+alt+i"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            binding_triggers(&config.keybinds().island_panel_toggle),
+            vec![BindingTrigger::Direct((
+                KeyCode::Char('i'),
+                KeyModifiers::CONTROL | KeyModifiers::ALT
             ))]
         );
     }

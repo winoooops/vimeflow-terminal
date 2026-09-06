@@ -350,6 +350,12 @@
           "description": "Focus the currently visible notification target."
         },
         {
+          "key": "keys.island_panel_toggle",
+          "type": "keybinding",
+          "default": "\"prefix+i\"",
+          "description": "Toggle the island notification panel when island records exist."
+        },
+        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",
@@ -806,6 +812,22 @@
           "type": "boolean",
           "default": "true",
           "description": "Show the active tab title in the pill: beside the circle in dots mode, replacing the number in numbers mode. Labels mode is unchanged. Reloads live."
+        },
+        {
+          "key": "ui.island.arrivals",
+          "type": "\"toast\" | \"silent\"",
+          "default": "\"toast\"",
+          "description": "Show an in-app toast when a background agent adds an island notification record, or record it silently. Reloads live.",
+          "values": [
+            "toast",
+            "silent"
+          ]
+        },
+        {
+          "key": "ui.island.bell",
+          "type": "string",
+          "default": "\"🔔\"",
+          "description": "Bell mark shown with the unread island-notification count. The emoji default needs no Nerd Font; use ! for ASCII. Values must occupy 1-2 display cells; one-cell values are right-padded and invalid values fall back to !. Reloads live."
         },
         {
           "key": "ui.agent_panel_sort",

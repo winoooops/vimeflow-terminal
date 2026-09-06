@@ -1,3 +1,5 @@
+// Modified from herdr by the vimeflow project — see FORK.md
+
 use std::time::{Duration, Instant};
 
 mod agent_view;
@@ -378,21 +380,25 @@ impl App {
             return;
         }
 
-        let Some(target) = self
-            .state
-            .toast
-            .as_ref()
-            .and_then(|toast| toast.target.as_ref())
-        else {
-            return;
-        };
-        if target.pane_id != update.pane_id {
-            return;
-        }
         let Some(ws) = self.state.workspaces.get(update.ws_idx) else {
             return;
         };
-        if ws.id != target.workspace_id {
+        let toast_matches = self.state.toast.as_ref().is_some_and(|toast| {
+            toast.target.as_ref().is_some_and(|target| {
+                target.pane_id == update.pane_id && target.workspace_id == ws.id
+            }) || toast
+                .island_record_id
+                .and_then(|id| {
+                    self.state
+                        .island_records
+                        .iter()
+                        .find(|record| record.id == id)
+                })
+                .is_some_and(|record| {
+                    record.pane_id == update.pane_id && record.workspace_id == ws.id
+                })
+        });
+        if !toast_matches {
             return;
         }
 
@@ -767,11 +773,25 @@ impl App {
             if let Some(toast) = delivery.client_notification.as_mut() {
                 toast.context = context.clone();
             }
-            if let Some(toast) = self.state.toast.as_mut() {
-                if toast.target.as_ref().is_some_and(|target| {
+            let refresh_current_toast = self.state.toast.as_ref().is_some_and(|toast| {
+                toast.target.as_ref().is_some_and(|target| {
                     target.workspace_id == delivery.workspace_id
                         && target.pane_id == delivery.pane_id
-                }) {
+                }) || toast
+                    .island_record_id
+                    .and_then(|id| {
+                        self.state
+                            .island_records
+                            .iter()
+                            .find(|record| record.id == id)
+                    })
+                    .is_some_and(|record| {
+                        record.workspace_id == delivery.workspace_id
+                            && record.pane_id == delivery.pane_id
+                    })
+            });
+            if let Some(toast) = self.state.toast.as_mut() {
+                if refresh_current_toast {
                     toast.context = context;
                 }
             }
@@ -1205,6 +1225,7 @@ impl App {
                         context: body.unwrap_or_default(),
                         position: params.position,
                         target: None,
+                        island_record_id: None,
                     });
                     self.sync_toast_deadline(previous_toast);
                     self.emit_api_notification_sound(requested_sound);
@@ -1704,6 +1725,7 @@ mod tests {
         app.state.mode = Mode::Terminal;
         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         app.state.toast_config.delay_seconds = 0;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Toast;
 
         let (events, _) = tokio::sync::mpsc::channel(4);
         let runtime = crate::terminal::TerminalRuntime::spawn(
@@ -1746,10 +1768,13 @@ mod tests {
             observed_at: std::time::Instant::now(),
         });
 
+        let toast = app.state.toast.as_ref().expect("island arrival toast");
+        assert_eq!(toast.context, "__herdr_projects__ · 1");
         assert_eq!(
-            app.state.toast.as_ref().map(|toast| toast.context.as_str()),
-            Some("__herdr_projects__ · 1")
+            toast.island_record_id,
+            app.state.island_records.front().map(|record| record.id)
         );
+        assert!(toast.target.is_none());
 
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
@@ -1795,6 +1820,7 @@ mod tests {
         app.state.active = None;
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Toast;
         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         app.state.toast_config.delay_seconds = 1;
 
@@ -1844,10 +1870,13 @@ mod tests {
             .next_pending_agent_notification_deadline()
             .expect("pending notification deadline");
         assert!(app.handle_scheduled_tasks(notification_deadline, false));
+        let toast = app.state.toast.as_ref().expect("island arrival toast");
+        assert_eq!(toast.context, "__herdr_projects__ · 1");
         assert_eq!(
-            app.state.toast.as_ref().map(|toast| toast.context.as_str()),
-            Some("__herdr_projects__ · 1")
+            toast.island_record_id,
+            app.state.island_records.front().map(|record| record.id)
         );
+        assert!(toast.target.is_none());
 
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
@@ -2227,6 +2256,7 @@ mod tests {
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
         app.state.toast_config.delivery = crate::config::ToastDelivery::Terminal;
+        app.state.island.arrivals = crate::config::IslandArrivalsConfig::Silent;
 
         app.handle_internal_event(AppEvent::StateChanged {
             pane_id: root,
@@ -2246,6 +2276,7 @@ mod tests {
                 workspace_id,
                 pane_id: root,
             }),
+            island_record_id: None,
         });
 
         app.handle_internal_event(AppEvent::StateChanged {
