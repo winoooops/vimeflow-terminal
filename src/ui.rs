@@ -299,6 +299,8 @@ fn compute_view_internal(
                 toast,
                 app.config_diagnostic.is_some(),
                 toast.position.unwrap_or(app.toast_config.herdr.position),
+                tab_bar_view.island_capsule_rect,
+                app.tab_bar_position,
             )
         })
         .unwrap_or_default();
@@ -509,20 +511,8 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
                 &app.palette,
             );
         } else {
-            render_toast_notification(
-                frame,
-                frame.area(),
-                toast,
-                has_config_diagnostic,
-                toast.position.unwrap_or(app.toast_config.herdr.position),
-                &app.palette,
-            );
-            toast_rect = Some(toast_notification_rect(
-                frame.area(),
-                toast,
-                has_config_diagnostic,
-                toast.position.unwrap_or(app.toast_config.herdr.position),
-            ));
+            render_toast_notification(frame, app.view.toast_hit_area, toast, &app.palette);
+            toast_rect = Some(app.view.toast_hit_area);
         }
         if app.view.layout == ViewLayout::Mobile {
             toast_rect = Some(mobile_toast_banner_rect(
@@ -632,6 +622,8 @@ mod tests {
             &toast,
             false,
             crate::config::ToastHerdrPosition::BottomRight,
+            Rect::default(),
+            crate::config::TabBarPositionConfig::Top,
         );
         assert_eq!(
             copy_feedback_offset_for_toast(
@@ -804,6 +796,155 @@ mod tests {
 
         assert_eq!(app.view.toast_hit_area.x, 0);
         assert_eq!(app.view.toast_hit_area.y, 1);
+    }
+
+    #[test]
+    fn desktop_island_toast_render_and_hit_area_center_on_capsule() {
+        use crate::config::{IslandPositionConfig, TabBarPositionConfig};
+
+        for position in [TabBarPositionConfig::Top, TabBarPositionConfig::Bottom] {
+            for alignment in [IslandPositionConfig::Center, IslandPositionConfig::Left] {
+                for kind in [
+                    crate::app::state::ToastKind::Finished,
+                    crate::app::state::ToastKind::NeedsAttention,
+                    crate::app::state::ToastKind::UpdateInstalled,
+                ] {
+                    let mut app = AppState::test_new();
+                    app.workspaces = vec![Workspace::test_new("one")];
+                    app.active = Some(0);
+                    app.mode = Mode::Terminal;
+                    app.tab_bar_position = position;
+                    app.island.position = alignment;
+                    app.toast = Some(crate::app::state::ToastNotification {
+                        kind,
+                        title: "done".into(),
+                        context: "workspace".into(),
+                        position: None,
+                        target: None,
+                        island_record_id: None,
+                    });
+                    let area = Rect::new(0, 0, 100, 20);
+                    compute_view(&mut app, area);
+                    let capsule =
+                        compute_tab_bar_view(&app, app.view.tab_bar_rect).island_capsule_rect;
+                    let toast = app.view.toast_hit_area;
+                    assert!(!capsule.is_empty());
+                    assert_eq!(toast.x, (capsule.x * 2 + capsule.width - toast.width) / 2);
+                    if position == TabBarPositionConfig::Top {
+                        assert_eq!(toast.y, capsule.bottom());
+                    } else {
+                        assert_eq!(toast.bottom(), capsule.y);
+                    }
+
+                    let mut terminal =
+                        Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+                    terminal.draw(|frame| render(&app, frame)).unwrap();
+                    let buffer = terminal.backend().buffer();
+                    assert_eq!(buffer[(toast.x, toast.y)].symbol(), "┌");
+                    assert_eq!(
+                        buffer[(toast.right() - 1, toast.bottom() - 1)].symbol(),
+                        "┘"
+                    );
+                    assert!(buffer_row_text(buffer, toast, toast.y + 1).contains("done"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn desktop_island_toast_falls_back_when_classic_or_tab_bar_hidden() {
+        use crate::config::{TabBarPositionConfig, TabBarStyleConfig};
+
+        for style in [TabBarStyleConfig::Classic, TabBarStyleConfig::Island] {
+            for position in [TabBarPositionConfig::Top, TabBarPositionConfig::Bottom] {
+                let mut app = AppState::test_new();
+                app.workspaces = vec![Workspace::test_new("one")];
+                app.active = Some(0);
+                app.tab_bar_style = style;
+                app.tab_bar_position = position;
+                app.hide_tab_bar_when_single_tab = style == TabBarStyleConfig::Island;
+                app.toast = Some(crate::app::state::ToastNotification {
+                    kind: crate::app::state::ToastKind::Finished,
+                    title: "done".into(),
+                    context: "workspace".into(),
+                    position: None,
+                    target: None,
+                    island_record_id: None,
+                });
+                compute_view(&mut app, Rect::new(0, 0, 100, 20));
+                assert!(compute_tab_bar_view(&app, app.view.tab_bar_rect)
+                    .island_capsule_rect
+                    .is_empty());
+                assert_eq!(app.view.toast_hit_area, Rect::new(42, 0, 15, 4));
+            }
+        }
+    }
+
+    #[test]
+    fn copy_feedback_stacks_away_from_island_toast_only_on_overlap() {
+        use crate::config::{TabBarPositionConfig, ToastClipboardPosition, ToastHerdrPosition};
+
+        let area = Rect::new(0, 0, 100, 20);
+        let feedback = crate::app::state::CopyFeedback {
+            message: "copied".into(),
+        };
+        let toast = crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::Finished,
+            title: "done".into(),
+            context: "workspace".into(),
+            position: None,
+            target: None,
+            island_record_id: None,
+        };
+        for (position, capsule_y, terminal_y, same_edge, opposite_edge) in [
+            (
+                TabBarPositionConfig::Top,
+                0,
+                1,
+                ToastClipboardPosition::TopCenter,
+                ToastClipboardPosition::BottomCenter,
+            ),
+            (
+                TabBarPositionConfig::Bottom,
+                19,
+                0,
+                ToastClipboardPosition::BottomCenter,
+                ToastClipboardPosition::TopCenter,
+            ),
+        ] {
+            let terminal_area = Rect::new(26, terminal_y, 74, 19);
+            for warning in [false, true] {
+                let toast_rect = toast_notification_rect(
+                    area,
+                    &toast,
+                    warning,
+                    ToastHerdrPosition::Island,
+                    Rect::new(58, capsule_y, 10, 1),
+                    position,
+                );
+                for clipboard_position in [same_edge, opposite_edge] {
+                    let base = u16::from(warning);
+                    let offset = copy_feedback_offset_for_toast(
+                        terminal_area,
+                        &feedback,
+                        base,
+                        clipboard_position,
+                        toast_rect,
+                    );
+                    assert_eq!(
+                        offset,
+                        base + if clipboard_position == same_edge {
+                            toast_rect.height
+                        } else {
+                            0
+                        }
+                    );
+                    let feedback_rect =
+                        copy_feedback_rect(terminal_area, &feedback, offset, clipboard_position);
+                    assert!(!rects_overlap(feedback_rect, toast_rect));
+                }
+            }
+        }
     }
 
     #[test]

@@ -578,6 +578,38 @@ ordinary target (see the arrival row above). Users rebind
 conflict exists since the default claims a free chord. Up/down/enter/esc
 follow the menu keyboard model (decision 9).
 
+### Toast placement (amended 2026-09-07, operator decision after M2b
+merged)
+
+All toasts pop **at the island**, not in herdr's bottom-right corner —
+notifications appear where their home lives. Mechanically this extends
+the existing config, not a new system: `ui.toast.herdr.position`
+(`ToastHerdrPosition`) gains an **`island`** variant, and the fork's
+default flips from `bottom-right` to `island`. Semantics:
+
+- **Anchor**: horizontally centered on the island capsule's x-center
+  (`TabBarView.island_capsule_rect`, stable within a page), opening
+  **toward the panes** exactly like the panel — below the bar when
+  `tab_bar_position = "top"`, above it when `"bottom"`. The
+  warning-offset and stacking logic reuse the existing `Top*` arms'
+  y-behavior (stacking away from the bar).
+- **Scope**: every herdr toast — island arrivals, stock agent
+  completions, API and update toasts — one placement rule, since the
+  operator asked for *all* notifications at the island.
+- **Classic fallback**: under `tab_bar_style = "classic"` (or when no
+  capsule is laid out) the `island` value renders at the plain
+  **top-center** of the area — still sensible, never a panic, no
+  upstream corner behavior silently restored.
+- **Escape hatch**: the four corner values remain; `position =
+  "bottom-right"` restores upstream behavior with one key. The clipboard
+  toast's own position config is untouched.
+- **Desktop-only, like the island**: the mobile layout draws its own
+  bottom toast banner and already bypasses the position setting entirely
+  (`src/ui.rs` mobile path) — it stays untouched; the `island` variant
+  and its top-center fallback apply to desktop layouts only.
+- **No morph in this slice**: the expand-from-island animation stays in
+  the deferred experiments (decision 4); this is placement only.
+
 ### Style gating and live transitions
 
 The notification subsystem is **island-only**. Under

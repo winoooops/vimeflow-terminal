@@ -12,7 +12,7 @@ use super::text::display_width_u16;
 use super::widgets::panel_contrast_fg;
 use crate::{
     app::state::{CopyFeedback, Palette, ToastKind, ToastNotification},
-    config::{ToastClipboardPosition, ToastHerdrPosition},
+    config::{TabBarPositionConfig, ToastClipboardPosition, ToastHerdrPosition},
     detect::AgentState,
 };
 
@@ -56,14 +56,22 @@ pub(crate) fn toast_notification_rect(
     toast: &ToastNotification,
     offset_for_warning: bool,
     position: ToastHerdrPosition,
+    capsule: Rect,
+    tab_bar_position: TabBarPositionConfig,
 ) -> Rect {
     let content_width = display_width_u16(&toast.title)
         .max(display_width_u16(&toast.context))
         .saturating_add(4);
     let width = content_width.saturating_add(2).min(area.width);
     let content_height = if toast.context.is_empty() { 1 } else { 2 };
-    let height = (content_height + 2).min(area.height);
+    let mut height = (content_height + 2).min(area.height);
     let x = match position {
+        ToastHerdrPosition::Island => {
+            let anchor = if capsule.is_empty() { area } else { capsule };
+            let center_twice = u32::from(anchor.x) * 2 + u32::from(anchor.width);
+            let desired_x = center_twice.saturating_sub(u32::from(width)) / 2;
+            desired_x.clamp(u32::from(area.x), u32::from(area.right() - width)) as u16
+        }
         ToastHerdrPosition::TopLeft | ToastHerdrPosition::BottomLeft => area.x,
         ToastHerdrPosition::TopRight | ToastHerdrPosition::BottomRight => {
             area.x + area.width.saturating_sub(width)
@@ -71,6 +79,27 @@ pub(crate) fn toast_notification_rect(
     };
     let warning_offset = u16::from(offset_for_warning);
     let y = match position {
+        ToastHerdrPosition::Island => {
+            let (top, bottom) = if capsule.is_empty() {
+                (area.y, area.bottom())
+            } else {
+                match tab_bar_position {
+                    TabBarPositionConfig::Top => {
+                        (capsule.bottom().clamp(area.y, area.bottom()), area.bottom())
+                    }
+                    TabBarPositionConfig::Bottom => {
+                        (area.y, capsule.y.clamp(area.y, area.bottom()))
+                    }
+                }
+            };
+            height = height.min(bottom - top);
+            let warning_offset = warning_offset.min(bottom - top - height);
+            if !capsule.is_empty() && tab_bar_position == TabBarPositionConfig::Bottom {
+                bottom - height - warning_offset
+            } else {
+                top + warning_offset
+            }
+        }
         ToastHerdrPosition::TopLeft | ToastHerdrPosition::TopRight => {
             area.y + warning_offset.min(area.height)
         }
@@ -83,10 +112,8 @@ pub(crate) fn toast_notification_rect(
 
 pub(super) fn render_toast_notification(
     frame: &mut Frame,
-    area: Rect,
+    toast_area: Rect,
     toast: &ToastNotification,
-    offset_for_warning: bool,
-    position: ToastHerdrPosition,
     p: &Palette,
 ) {
     let dot_color = match toast.kind {
@@ -94,8 +121,6 @@ pub(super) fn render_toast_notification(
         ToastKind::Finished => p.blue,
         ToastKind::UpdateInstalled => p.accent,
     };
-    let toast_area = toast_notification_rect(area, toast, offset_for_warning, position);
-
     frame.render_widget(Clear, toast_area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -268,23 +293,122 @@ mod tests {
         let area = Rect::new(10, 20, 100, 40);
         let toast = toast();
 
-        let top_left = toast_notification_rect(area, &toast, false, ToastHerdrPosition::TopLeft);
-        assert_eq!(top_left.x, area.x);
-        assert_eq!(top_left.y, area.y);
+        for (position, x, y, warning_y) in [
+            (ToastHerdrPosition::TopLeft, 10, 20, 21),
+            (ToastHerdrPosition::TopRight, 95, 20, 21),
+            (ToastHerdrPosition::BottomLeft, 10, 56, 55),
+            (ToastHerdrPosition::BottomRight, 95, 56, 55),
+        ] {
+            for capsule in [Rect::default(), Rect::new(60, 20, 20, 1)] {
+                for warning in [false, true] {
+                    assert_eq!(
+                        toast_notification_rect(
+                            area,
+                            &toast,
+                            warning,
+                            position,
+                            capsule,
+                            TabBarPositionConfig::Top,
+                        ),
+                        Rect::new(x, if warning { warning_y } else { y }, 15, 4),
+                    );
+                }
+            }
+        }
+    }
 
-        let top_right = toast_notification_rect(area, &toast, false, ToastHerdrPosition::TopRight);
-        assert_eq!(top_right.x + top_right.width, area.x + area.width);
-        assert_eq!(top_right.y, area.y);
+    #[test]
+    fn island_toast_rect_centers_on_capsule_and_opens_toward_panes() {
+        let area = Rect::new(10, 20, 100, 40);
+        for (position, capsule_y, toast_y, warning_y) in [
+            (TabBarPositionConfig::Top, 20, 21, 22),
+            (TabBarPositionConfig::Bottom, 59, 55, 54),
+        ] {
+            for warning in [false, true] {
+                assert_eq!(
+                    toast_notification_rect(
+                        area,
+                        &toast(),
+                        warning,
+                        ToastHerdrPosition::Island,
+                        Rect::new(66, capsule_y, 20, 1),
+                        position,
+                    ),
+                    Rect::new(68, if warning { warning_y } else { toast_y }, 15, 4),
+                );
+            }
+        }
+    }
 
-        let bottom_left =
-            toast_notification_rect(area, &toast, false, ToastHerdrPosition::BottomLeft);
-        assert_eq!(bottom_left.x, area.x);
-        assert_eq!(bottom_left.y + bottom_left.height, area.y + area.height);
+    #[test]
+    fn island_toast_rect_clamps_at_both_edges_and_in_short_areas() {
+        for width in 1..=40 {
+            for height in 1..=8 {
+                let area = Rect::new(10, 20, width, height);
+                for position in [TabBarPositionConfig::Top, TabBarPositionConfig::Bottom] {
+                    let capsule_y = if position == TabBarPositionConfig::Top {
+                        area.y
+                    } else {
+                        area.bottom() - 1
+                    };
+                    let capsule_width = 3.min(width);
+                    for left in [true, false] {
+                        let capsule_x = if left {
+                            area.x
+                        } else {
+                            area.right() - capsule_width
+                        };
+                        let capsule = Rect::new(capsule_x, capsule_y, capsule_width, 1);
+                        for warning in [false, true] {
+                            let rect = toast_notification_rect(
+                                area,
+                                &toast(),
+                                warning,
+                                ToastHerdrPosition::Island,
+                                capsule,
+                                position,
+                            );
+                            assert_eq!(rect.width, 15.min(width));
+                            assert_eq!(rect.height, 4.min(height - 1));
+                            assert_eq!(
+                                rect.x,
+                                if left {
+                                    area.x
+                                } else {
+                                    area.right() - rect.width
+                                }
+                            );
+                            assert!(rect.y >= area.y && rect.bottom() <= area.bottom());
+                            assert!(if position == TabBarPositionConfig::Top {
+                                rect.y >= capsule.bottom()
+                            } else {
+                                rect.bottom() <= capsule.y
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-        let bottom_right =
-            toast_notification_rect(area, &toast, false, ToastHerdrPosition::BottomRight);
-        assert_eq!(bottom_right.x + bottom_right.width, area.x + area.width);
-        assert_eq!(bottom_right.y + bottom_right.height, area.y + area.height);
+    #[test]
+    fn island_toast_rect_without_capsule_falls_back_to_top_center() {
+        let area = Rect::new(10, 20, 100, 40);
+        for position in [TabBarPositionConfig::Top, TabBarPositionConfig::Bottom] {
+            for warning in [false, true] {
+                assert_eq!(
+                    toast_notification_rect(
+                        area,
+                        &toast(),
+                        warning,
+                        ToastHerdrPosition::Island,
+                        Rect::default(),
+                        position,
+                    ),
+                    Rect::new(52, 20 + u16::from(warning), 15, 4),
+                );
+            }
+        }
     }
 
     #[test]
@@ -299,7 +423,14 @@ mod tests {
             island_record_id: None,
         };
 
-        let rect = toast_notification_rect(area, &toast, false, ToastHerdrPosition::TopRight);
+        let rect = toast_notification_rect(
+            area,
+            &toast,
+            false,
+            ToastHerdrPosition::TopRight,
+            Rect::default(),
+            TabBarPositionConfig::Top,
+        );
 
         let expected_content_width =
             display_width_u16(&toast.title).max(display_width_u16(&toast.context)) + 6;
