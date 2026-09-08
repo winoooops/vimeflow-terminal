@@ -26,6 +26,18 @@ const UNFOCUSED_TRACE_ROWS: u8 = 5;
 /// the unit herdr reserves panel space in.
 const COMPACT_CARD_LINES: usize = 3;
 
+/// Columns held back from the card so its right-justified content never lands
+/// on the panel's last cell.
+///
+/// The watcher justifies the state glyph flush right and its lines measure
+/// exactly the width they were given, so by `unicode_width` nothing overflows.
+/// But the marks it uses — `●`, `◐`, `○` — are East Asian *Ambiguous* width:
+/// `unicode_width` calls them one cell, and a terminal configured wide for CJK
+/// draws them as two. The extra cell then falls off the edge and the glyph
+/// renders as a sliver. Two columns cover a wide mark at each end, and read as
+/// deliberate padding when the terminal draws them narrow.
+const RIGHT_GUTTER: u16 = 2;
+
 pub(crate) struct CardInput<'a> {
     pub workspace: &'a str,
     pub name: &'a str,
@@ -52,7 +64,7 @@ pub(crate) fn build_card(
     body_height: u16,
     expanded: bool,
 ) -> BuiltCard {
-    let width = width.max(1);
+    let width = width.saturating_sub(RIGHT_GUTTER).max(1);
 
     // The watcher only knows panes it has bound. For the rest herdr stands in
     // with an empty telemetry carrying its own detector state, so an unbound
@@ -221,6 +233,7 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::*;
+    use unicode_width::UnicodeWidthStr;
 
     fn telemetry() -> PaneTelemetry {
         let mut telemetry = PaneTelemetry::with_agent("claude");
@@ -249,6 +262,28 @@ mod tests {
                 trace_focus: focus,
             },
             40,
+            height,
+            expanded,
+        )
+    }
+
+    fn card_at(
+        telemetry: Option<&PaneTelemetry>,
+        expanded: bool,
+        width: u16,
+        height: u16,
+    ) -> BuiltCard {
+        build_card(
+            CardInput {
+                workspace: "vimeflow",
+                name: "claude",
+                task: Some("ship cards"),
+                state: AgentState::Working,
+                seen: true,
+                telemetry,
+                trace_focus: None,
+            },
+            width,
             height,
             expanded,
         )
@@ -283,8 +318,10 @@ mod tests {
         let rendered = plain(&card(None, None, false, 3));
 
         assert_eq!(rendered.len(), 3, "a stand-in card is still a card");
+        // The state *word* only renders at card widths >= 40, which the sidebar
+        // never reaches, so the glyph is what carries the detector's verdict.
         assert!(
-            rendered.iter().any(|line| line.contains("working")),
+            rendered.iter().any(|line| line.contains('◐')),
             "detector state should reach the glyph, got {rendered:?}"
         );
     }
@@ -380,6 +417,29 @@ mod tests {
             tight.lines.len() <= full - COMPACT_CARD_LINES,
             "should have shrunk to respect the reserve"
         );
+    }
+
+    #[test]
+    fn cards_leave_the_panels_last_columns_free() {
+        // The watcher fills exactly the width it is given, so without the
+        // gutter its flush-right state glyph lands on the final cell — where a
+        // terminal that draws ambiguous-width marks as two cells clips it.
+        // Only meaningful at or above the watcher's own `MIN_WIDTH`: its card
+        // layout is not defined below that and overflows by a cell, which is
+        // why herdr's sidebar has to stay wide enough for it.
+        let telemetry = telemetry();
+        for width in [view::MIN_WIDTH + RIGHT_GUTTER, 40, 50] {
+            for expanded in [false, true] {
+                let built = card_at(Some(&telemetry), expanded, width, 200);
+                for line in plain(&built) {
+                    let measured = UnicodeWidthStr::width(line.as_str()) as u16;
+                    assert!(
+                        measured + RIGHT_GUTTER <= width,
+                        "line {line:?} measured {measured} of {width}, leaving no gutter"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
