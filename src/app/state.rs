@@ -815,6 +815,10 @@ pub enum Mode {
     OpenExistingWorktree,
     ConfirmRemoveWorktree,
     Resize,
+    /// Keyboard navigation of the agents sidebar: a card zone and a trace
+    /// zone. Captures keys the way `Copy` does, because bare j/k/o would
+    /// otherwise reach the pane's agent.
+    Agents,
     ConfirmClose,
     ContextMenu,
     Settings,
@@ -1649,6 +1653,19 @@ pub struct AppState {
     /// The focused card explicitly toggled closed; a different focused pane
     /// expands automatically without a focus-change hook.
     pub agent_card_collapsed_for: Option<PaneId>,
+    /// Card the keyboard cursor sits on while `Mode::Agents` is active, and the
+    /// card that expands instead of the focused pane's. Deliberately does not
+    /// move pane focus: walking the list would otherwise switch workspace and
+    /// tab on every keystroke and throw the main view around.
+    pub agent_card_cursor: Option<PaneId>,
+    /// Selected trace row as `(anchor pane, toolUseId)`. The id is the ring's
+    /// own stable key; a row index would silently retarget as calls push in.
+    /// Ids are only pane-unique, so both halves are always compared together.
+    pub agent_trace_focus: Option<(PaneId, String)>,
+    /// Open trace detail panel. Holds a snapshot taken at open, so a call
+    /// falling off the ring never mutates text under a reading user.
+    #[cfg(unix)]
+    pub agent_trace_panel: Option<herdr_agent_watcher::sidebar::dialog::Panel>,
     #[cfg(unix)]
     pub agent_telemetry:
         std::collections::HashMap<String, herdr_agent_watcher::daemon::store::PaneTelemetry>,
@@ -2048,6 +2065,10 @@ impl AppState {
             compact_rail_leading: CompactRailLeading::Inherit,
             compact_rail_marks: std::collections::HashMap::new(),
             agent_card_collapsed_for: None,
+            agent_card_cursor: None,
+            agent_trace_focus: None,
+            #[cfg(unix)]
+            agent_trace_panel: None,
             #[cfg(unix)]
             agent_telemetry: std::collections::HashMap::new(),
             agent_view_override: None,

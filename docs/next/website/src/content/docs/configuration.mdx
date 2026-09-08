@@ -273,6 +273,22 @@ Island notifications operate on the foreground client in multi-client sessions; 
 
 Install any Nerd Font and set it as your terminal font to use a custom icon, then set an override such as `bell = "󰂚"` under `[ui.island]`. All seven `[ui.island]` settings and `ui.tab_bar_style` reload live.
 
+### Agent card traces
+
+An expanded agent card lists its recent tool calls. Click one to select it, and click the selected row again to open a detail panel showing status, duration, timestamp, and the full retained argument preview — pretty-printed when it parses as JSON.
+
+Press `prefix+a` (`keys.focus_agents`) to drive the sidebar from the keyboard. The mode captures keys and has two zones, shown in the mode bar:
+
+| Zone | Keys |
+| --- | --- |
+| Cards | `j`/`k` move the cursor, `l` descends into traces, Enter focuses that pane and exits, `h`/Esc leaves |
+| Traces | `j`/`k` move the selection, `o`/Enter opens the detail panel, `h` returns to cards, Esc leaves |
+| Detail panel | `j`/`k` scroll, Esc closes the panel and keeps your place |
+
+Moving the card cursor deliberately does **not** change pane focus — walking the list would otherwise switch workspace and tab on every keystroke. The card under the cursor expands while you move; Enter is the only key that commits focus.
+
+While a trace is selected the card renders its whole retained ring instead of the usual five rows. Only settled calls that carry a tool-use id are selectable; the rest still render but are skipped by `j`/`k` and ignored by clicks.
+
 ### Sidebar row layouts
 
 The expanded desktop sidebar renders each inner array in `rows` as one line. These are the complete default layouts:

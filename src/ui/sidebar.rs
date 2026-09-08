@@ -609,8 +609,20 @@ fn build_agent_card(
         .pane_label
         .as_deref()
         .or(entry.terminal_title_stripped.as_deref());
-    let expanded = app.is_active_pane(entry.ws_idx, entry.tab_idx, entry.pane_id)
-        && app.agent_card_collapsed_for != Some(entry.pane_id);
+    // While the keyboard cursor is up it decides expansion, so walking the list
+    // expands under the cursor without the main view following along.
+    let expanded = match app.agent_card_cursor {
+        Some(cursor) => cursor == entry.pane_id,
+        None => {
+            app.is_active_pane(entry.ws_idx, entry.tab_idx, entry.pane_id)
+                && app.agent_card_collapsed_for != Some(entry.pane_id)
+        }
+    };
+    let trace_focus = app
+        .agent_trace_focus
+        .as_ref()
+        .filter(|(pane, _)| *pane == entry.pane_id)
+        .map(|(_, id)| id.as_str());
     crate::agent_cards::view::build_card(
         crate::agent_cards::view::CardInput {
             workspace: &entry.primary_label,
@@ -619,11 +631,33 @@ fn build_agent_card(
             state: entry.state,
             seen: entry.seen,
             telemetry,
+            trace_focus,
         },
         body_width,
         body_height,
         expanded,
     )
+}
+
+/// `(pane id, toolUseId, card-local span)` for the card's selectable trace
+/// rows, shaped for the watcher's `layout::trace_at`. Display-only rows export
+/// nothing, so a hit-test can never land on one.
+#[cfg(unix)]
+pub(crate) fn agent_card_trace_spans(
+    app: &AppState,
+    entry: &AgentPanelEntry,
+    body_width: u16,
+    body_height: u16,
+) -> Vec<(
+    String,
+    String,
+    herdr_agent_watcher::sidebar::layout::LineSpan,
+)> {
+    build_agent_card(app, entry, body_width, body_height)
+        .trace_spans
+        .into_iter()
+        .map(|(id, span)| (entry.pane_id.raw().to_string(), id, span))
+        .collect()
 }
 
 pub(crate) fn agent_entry_height_in_body(

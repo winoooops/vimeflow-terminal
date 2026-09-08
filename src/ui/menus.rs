@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Modifier, Style},
@@ -281,6 +282,115 @@ pub(super) fn render_resize_overlay(app: &AppState, frame: &mut Frame, area: Rec
     let overlay_y = area.y + area.height.saturating_sub(1);
     let overlay_area = Rect::new(area.x, overlay_y, area.width, 1);
     render_bottom_bar(frame, overlay_area, line, app.palette.panel_bg);
+}
+
+pub(super) fn render_trace_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
+    let key = Style::default()
+        .fg(app.palette.accent)
+        .add_modifier(Modifier::BOLD);
+    let dim = Style::default().fg(app.palette.overlay0);
+
+    let mode_style = Style::default()
+        .fg(panel_contrast_fg(&app.palette))
+        .bg(app.palette.mauve)
+        .add_modifier(Modifier::BOLD);
+
+    #[cfg(unix)]
+    let reading = app.agent_trace_panel.is_some();
+    #[cfg(not(unix))]
+    let reading = false;
+
+    // The footer doubles as the zone indicator: it speaks the active zone's
+    // dialect, so `h` always reads as one level up from wherever you are.
+    let line = if reading {
+        Line::from(vec![
+            Span::styled(" TRACE ", mode_style),
+            Span::raw("  "),
+            Span::styled("j/k", key),
+            Span::styled(" scroll  ", dim),
+            Span::styled("esc", key),
+            Span::styled(" close", dim),
+        ])
+    } else if app.agent_trace_focus.is_some() {
+        Line::from(vec![
+            Span::styled(" TRACE ", mode_style),
+            Span::raw("  "),
+            Span::styled("j/k", key),
+            Span::styled(" move  ", dim),
+            Span::styled("o/↵", key),
+            Span::styled(" open  ", dim),
+            Span::styled("h", key),
+            Span::styled(" back  ", dim),
+            Span::styled("esc", key),
+            Span::styled(" done", dim),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(" AGENTS ", mode_style),
+            Span::raw("  "),
+            Span::styled("j/k", key),
+            Span::styled(" move  ", dim),
+            Span::styled("l", key),
+            Span::styled(" traces  ", dim),
+            Span::styled("↵", key),
+            Span::styled(" focus  ", dim),
+            Span::styled("esc", key),
+            Span::styled(" done", dim),
+        ])
+    };
+
+    let overlay_y = area.y + area.height.saturating_sub(1);
+    let overlay_area = Rect::new(area.x, overlay_y, area.width, 1);
+    render_bottom_bar(frame, overlay_area, line, app.palette.panel_bg);
+}
+
+/// The panel's drawn width. Shared with the key handler's offset bounds: the
+/// watcher's `line_count` wraps at this width, and feeding it the unclamped
+/// frame width would undercount wrapped lines and strand the tail of a long
+/// args preview.
+#[cfg(unix)]
+pub(crate) fn trace_panel_width(area: Rect) -> u16 {
+    area.width.saturating_sub(4).min(60)
+}
+
+#[cfg(unix)]
+pub(super) fn render_trace_detail(app: &AppState, frame: &mut Frame, area: Rect) {
+    use herdr_agent_watcher::sidebar::dialog;
+
+    let Some(panel) = &app.agent_trace_panel else {
+        return;
+    };
+    let width = trace_panel_width(area);
+    if width == 0 || area.height < 4 {
+        return;
+    }
+    let height = dialog::line_count(panel, width)
+        .saturating_add(2)
+        .min(area.height.saturating_sub(2) as usize) as u16;
+    let x = area.x + area.width.saturating_sub(width + 2) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    let rect = Rect::new(x, y, width + 2, height);
+
+    let p = &app.palette;
+    let Some(inner) = render_panel_shell(frame, rect, p.accent, p.panel_bg) else {
+        return;
+    };
+    for (offset, line) in dialog::render(panel, inner.width, inner.height)
+        .into_iter()
+        .enumerate()
+        .take(inner.height as usize)
+    {
+        let spans = line.into_iter().map(|span| {
+            Span::styled(
+                span.text,
+                crate::agent_cards::view::palette_style(span.style, p),
+            )
+        });
+        frame.render_widget(
+            Paragraph::new(Line::from_iter(spans)),
+            Rect::new(inner.x, inner.y + offset as u16, inner.width, 1),
+        );
+    }
 }
 
 pub(super) fn render_context_menu(app: &AppState, frame: &mut Frame) {

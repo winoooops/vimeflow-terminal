@@ -1,11 +1,21 @@
+use std::collections::HashSet;
+
 use herdr_agent_watcher::daemon::store::PaneTelemetry;
-use herdr_agent_watcher::sidebar::view::{Line, Role, Semantic, Span, Style as WatcherStyle};
+use herdr_agent_watcher::sidebar::layout::LineSpan;
+use herdr_agent_watcher::sidebar::view::{
+    call_id, selectable_call, Line, Role, Semantic, Span, Style as WatcherStyle,
+};
 use ratatui::style::{Color, Modifier, Style};
 use serde_json::Value;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::state::Palette;
 use crate::detect::AgentState;
+
+/// Trace rows shown when the card is not the trace anchor. The anchor renders
+/// its whole retained ring instead, so navigation is not limited to a window
+/// the selection can fall outside of.
+const UNFOCUSED_TRACE_ROWS: usize = 5;
 
 pub(crate) struct CardInput<'a> {
     pub workspace: &'a str,
@@ -14,10 +24,17 @@ pub(crate) struct CardInput<'a> {
     pub state: AgentState,
     pub seen: bool,
     pub telemetry: Option<&'a PaneTelemetry>,
+    /// `toolUseId` selected on this card, set only for the trace anchor. Some
+    /// also means "render the full ring".
+    pub trace_focus: Option<&'a str>,
 }
 
 pub(crate) struct BuiltCard {
     pub lines: Vec<Line>,
+    /// `(toolUseId, span)` for every selectable trace row actually rendered,
+    /// in card-local line coordinates. Display-only rows export nothing, so a
+    /// hit-test can never select one.
+    pub trace_spans: Vec<(String, LineSpan)>,
 }
 
 pub(crate) fn build_card(
@@ -34,20 +51,46 @@ pub(crate) fn build_card(
     ];
     if !expanded || input.telemetry.is_none() || body_height <= 3 {
         lines.truncate(body_height as usize);
-        return BuiltCard { lines };
+        return BuiltCard {
+            lines,
+            trace_spans: Vec::new(),
+        };
     }
 
-    let telemetry = input.telemetry.expect("checked telemetry");
+    let Some(telemetry) = input.telemetry else {
+        return BuiltCard {
+            lines,
+            trace_spans: Vec::new(),
+        };
+    };
+    let (trace_lines, local_spans) = trace_rows(telemetry, input.trace_focus);
     let groups = [
         model_rows(telemetry),
         gauge_rows(telemetry, width),
         tool_rows(telemetry),
-        trace_rows(telemetry),
+        trace_lines,
     ];
+    let mut trace_spans = Vec::new();
     let mut remaining = body_height.saturating_sub(3) as usize;
     for (index, group) in groups.into_iter().enumerate() {
         if index == 3 {
+            // The trace group is the only one allowed to render partially, so
+            // it is also the only one whose spans need clipping to what fit.
+            let base = lines.len();
             lines.extend(group.into_iter().take(remaining));
+            trace_spans = local_spans
+                .into_iter()
+                .filter(|(_, span)| span.start < remaining)
+                .map(|(id, span)| {
+                    (
+                        id,
+                        LineSpan {
+                            start: base + span.start,
+                            height: span.height,
+                        },
+                    )
+                })
+                .collect();
             break;
         }
         if group.len() > remaining {
@@ -59,7 +102,7 @@ pub(crate) fn build_card(
     for line in &mut lines {
         *line = fit_line(std::mem::take(line), width as usize);
     }
-    BuiltCard { lines }
+    BuiltCard { lines, trace_spans }
 }
 
 fn lifecycle(state: AgentState, seen: bool) -> (&'static str, &'static str, Semantic) {
@@ -205,30 +248,75 @@ fn tool_rows(telemetry: &PaneTelemetry) -> Vec<Line> {
     vec![labeled("TOOLS", &text, Semantic::Accent)]
 }
 
-fn trace_rows(telemetry: &PaneTelemetry) -> Vec<Line> {
-    telemetry
-        .tool_calls
-        .iter()
-        .rev()
-        .take(5)
-        .map(|call| {
-            let failed = call.get("status").and_then(Value::as_str) == Some("failed");
-            let glyph = if failed { "✕" } else { "✓" };
-            let semantic = if failed {
-                Semantic::Bad
-            } else {
-                Semantic::Good
-            };
-            let tool = call.get("tool").and_then(Value::as_str).unwrap_or("?");
-            let args = call.get("args").and_then(Value::as_str).unwrap_or("");
-            vec![
-                Span::body("  "),
-                Span::new(glyph, WatcherStyle::semantic(Role::Body, semantic)),
-                Span::body(" "),
-                Span::new(format!("{tool} {args}"), WatcherStyle::role(Role::Label)),
-            ]
-        })
-        .collect()
+/// Newest first, at most one row per `toolUseId`. `call_id` and
+/// `selectable_call` come from the watcher so rendering, hit-testing and the
+/// key resolver can never disagree on what counts as a selectable row.
+fn trace_rows(
+    telemetry: &PaneTelemetry,
+    focus: Option<&str>,
+) -> (Vec<Line>, Vec<(String, LineSpan)>) {
+    let limit = if focus.is_some() {
+        telemetry.tool_calls.len()
+    } else {
+        UNFOCUSED_TRACE_ROWS
+    };
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut lines = Vec::new();
+    let mut spans = Vec::new();
+    for call in telemetry.tool_calls.iter().rev() {
+        if lines.len() >= limit {
+            break;
+        }
+        let id = call_id(call);
+        // A newer occurrence shadows older ones; id-less rows are never
+        // deduplicated because they carry no identity to collide on.
+        if let Some(id) = id {
+            if !seen.insert(id) {
+                continue;
+            }
+        }
+        let selectable = selectable_call(call);
+        let selected = selectable && id.is_some() && id == focus;
+        if selectable {
+            if let Some(id) = id {
+                spans.push((
+                    id.to_string(),
+                    LineSpan {
+                        start: lines.len(),
+                        height: 1,
+                    },
+                ));
+            }
+        }
+        lines.push(trace_row(call, selected));
+    }
+    (lines, spans)
+}
+
+fn trace_row(call: &Value, selected: bool) -> Line {
+    let failed = call.get("status").and_then(Value::as_str) == Some("failed");
+    let glyph = if failed { "✕" } else { "✓" };
+    let semantic = if failed {
+        Semantic::Bad
+    } else {
+        Semantic::Good
+    };
+    let tool = call.get("tool").and_then(Value::as_str).unwrap_or("?");
+    let args = call.get("args").and_then(Value::as_str).unwrap_or("");
+    let mark = |style: WatcherStyle| {
+        let mut style = style;
+        style.reverse = selected;
+        style
+    };
+    vec![
+        Span::new("  ", mark(WatcherStyle::role(Role::Body))),
+        Span::new(glyph, mark(WatcherStyle::semantic(Role::Body, semantic))),
+        Span::new(" ", mark(WatcherStyle::role(Role::Body))),
+        Span::new(
+            format!("{tool} {args}"),
+            mark(WatcherStyle::role(Role::Label)),
+        ),
+    ]
 }
 
 fn labeled(label: &str, value: &str, semantic: Semantic) -> Line {
@@ -408,6 +496,7 @@ mod tests {
                                     state,
                                     seen,
                                     telemetry: present.then_some(&telemetry),
+                                    trace_focus: None,
                                 },
                                 width,
                                 height,
@@ -445,6 +534,7 @@ mod tests {
                     state: AgentState::Working,
                     seen: true,
                     telemetry: Some(&telemetry),
+                    trace_focus: None,
                 },
                 35,
                 height,
@@ -470,5 +560,124 @@ mod tests {
         assert!(palette_style(WatcherStyle::role(Role::Emphasis), &palette)
             .add_modifier
             .contains(Modifier::BOLD));
+    }
+
+    /// Oldest first, the way the daemon pushes into the ring.
+    fn traced(calls: &[(&str, &str, &str)]) -> PaneTelemetry {
+        let mut telemetry = telemetry();
+        telemetry.tool_calls = calls
+            .iter()
+            .map(|(id, tool, status)| {
+                serde_json::json!({
+                    "toolUseId": id, "tool": tool, "args": "x", "status": status
+                })
+            })
+            .collect();
+        telemetry
+    }
+
+    fn card_with(telemetry: &PaneTelemetry, focus: Option<&str>, height: u16) -> BuiltCard {
+        build_card(
+            CardInput {
+                workspace: "ws",
+                name: "claude",
+                task: None,
+                state: AgentState::Working,
+                seen: true,
+                telemetry: Some(telemetry),
+                trace_focus: focus,
+            },
+            40,
+            height,
+            true,
+        )
+    }
+
+    #[test]
+    fn only_selectable_rows_export_spans() {
+        // An id-less row and an unsettled row both render but must not be
+        // reachable by a hit-test.
+        let telemetry = traced(&[
+            ("", "NoId", "done"),
+            ("a", "Running", "running"),
+            ("b", "Edit", "done"),
+        ]);
+        let card = card_with(&telemetry, None, 40);
+
+        let ids: Vec<&str> = card.trace_spans.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["b"], "only the settled id-bearing row");
+        assert!(
+            plain(&card).iter().any(|line| line.contains("Running")),
+            "display-only rows still render"
+        );
+    }
+
+    #[test]
+    fn duplicate_ids_render_once_newest_wins() {
+        let telemetry = traced(&[("dup", "Old", "done"), ("dup", "New", "done")]);
+        let card = card_with(&telemetry, None, 40);
+
+        assert_eq!(card.trace_spans.len(), 1);
+        let rendered = plain(&card);
+        assert!(rendered.iter().any(|line| line.contains("New")));
+        assert!(!rendered.iter().any(|line| line.contains("Old")));
+    }
+
+    #[test]
+    fn focus_renders_the_whole_ring_and_reverses_the_selection() {
+        let calls: Vec<(String, &str, &str)> = (0..9)
+            .map(|index| (format!("id{index}"), "Edit", "done"))
+            .collect();
+        let borrowed: Vec<(&str, &str, &str)> = calls
+            .iter()
+            .map(|(id, tool, status)| (id.as_str(), *tool, *status))
+            .collect();
+        let telemetry = traced(&borrowed);
+
+        let unfocused = card_with(&telemetry, None, 40);
+        assert_eq!(
+            unfocused.trace_spans.len(),
+            UNFOCUSED_TRACE_ROWS,
+            "unfocused cards keep the window"
+        );
+
+        let focused = card_with(&telemetry, Some("id2"), 40);
+        assert_eq!(focused.trace_spans.len(), 9, "focus shows the full ring");
+
+        // The selected row, and only it, is reversed.
+        let selected = focused
+            .trace_spans
+            .iter()
+            .find(|(id, _)| id == "id2")
+            .map(|(_, span)| span.start)
+            .expect("id2 is rendered");
+        assert!(focused.lines[selected]
+            .iter()
+            .all(|span| span.style.reverse));
+        for (_, span) in focused.trace_spans.iter().filter(|(id, _)| id != "id2") {
+            assert!(focused.lines[span.start]
+                .iter()
+                .all(|line| !line.style.reverse));
+        }
+    }
+
+    #[test]
+    fn spans_are_clipped_to_the_rows_that_fit() {
+        let calls: Vec<(String, &str, &str)> = (0..9)
+            .map(|index| (format!("id{index}"), "Edit", "done"))
+            .collect();
+        let borrowed: Vec<(&str, &str, &str)> = calls
+            .iter()
+            .map(|(id, tool, status)| (id.as_str(), *tool, *status))
+            .collect();
+        let telemetry = traced(&borrowed);
+
+        // A short card renders only some trace rows; a span past the fold
+        // would hit-test to a row that is not on screen.
+        let card = card_with(&telemetry, Some("id0"), 9);
+        assert!(card
+            .trace_spans
+            .iter()
+            .all(|(_, span)| span.start < card.lines.len()));
     }
 }

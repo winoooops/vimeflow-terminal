@@ -678,6 +678,10 @@ impl App {
                 &config.ui.sidebar.compact_rail_marks,
             ),
             agent_card_collapsed_for: None,
+            agent_card_cursor: None,
+            agent_trace_focus: None,
+            #[cfg(unix)]
+            agent_trace_panel: None,
             #[cfg(unix)]
             agent_telemetry: std::collections::HashMap::new(),
             agent_view_override: None,
@@ -1912,6 +1916,9 @@ impl App {
             }
             Mode::Copy => {
                 self.handle_copy_mode_key(key);
+            }
+            Mode::Agents => {
+                self.handle_trace_key(key);
             }
             Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane => {
                 self.handle_rename_key_via_api(key_event);

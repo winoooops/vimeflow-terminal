@@ -50,7 +50,9 @@ schemars = { version = "1.2.1", features = ["derive"] }
 portable-pty = { path = "vendor/portable-pty" }
 
 [target.'cfg(unix)'.dependencies]
-herdr-agent-watcher = { git = "https://github.com/winoooops/herdr-agent-watcher", tag = "v0.2.4", features = ["runtime"] }
+# TEMPORARY rev pin: waiting on winoooops/herdr-agent-watcher#4 (exports
+# `sidebar::format`). Switch to `tag = "v0.2.8"` once that merges and is tagged.
+herdr-agent-watcher = { git = "https://github.com/winoooops/herdr-agent-watcher", rev = "5093c24", features = ["runtime"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 [target.'cfg(windows)'.dependencies]

@@ -321,6 +321,7 @@ pub struct Keybinds {
     pub reload_config: ActionKeybinds,
     pub open_notification_target: ActionKeybinds,
     pub island_panel_toggle: ActionKeybinds,
+    pub focus_agents: ActionKeybinds,
     pub previous_workspace: ActionKeybinds,
     pub next_workspace: ActionKeybinds,
     pub previous_agent: ActionKeybinds,
@@ -484,6 +485,7 @@ impl Config {
             reload_config: empty_action!(),
             open_notification_target: empty_action!(),
             island_panel_toggle: empty_action!(),
+            focus_agents: empty_action!(),
             previous_workspace: empty_action!(),
             next_workspace: empty_action!(),
             previous_agent: empty_action!(),
@@ -611,6 +613,7 @@ impl Config {
                 source
             );
             apply_action!(keybinds.island_panel_toggle, island_panel_toggle, source);
+            apply_action!(keybinds.focus_agents, focus_agents, source);
             apply_action!(keybinds.previous_workspace, previous_workspace, source);
             apply_action!(keybinds.next_workspace, next_workspace, source);
             apply_action!(keybinds.previous_agent, previous_agent, source);

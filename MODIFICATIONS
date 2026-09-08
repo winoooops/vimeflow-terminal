@@ -55,6 +55,7 @@ Modified upstream files
 - src/server/headless.rs
 - src/ui.rs
 - src/ui/keybind_help.rs
+- src/ui/menus.rs
 - src/ui/sidebar.rs
 - src/ui/status.rs
 - src/ui/tab_surface.rs
@@ -82,6 +83,7 @@ Fork-added files
 - src/server/headless/embedded_watcher.rs
 - src/agent_cards.rs
 - src/agent_cards/
+- src/app/input/trace.rs
 - src/ui/island.rs
 - src/title_sync/
 

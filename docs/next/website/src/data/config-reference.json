@@ -356,6 +356,12 @@
           "description": "Toggle the island notification panel when island records exist."
         },
         {
+          "key": "keys.focus_agents",
+          "type": "keybinding",
+          "default": "\"prefix+a\"",
+          "description": "Move keyboard focus into the agents sidebar to walk cards and their traces."
+        },
+        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",
