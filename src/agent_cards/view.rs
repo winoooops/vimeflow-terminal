@@ -1,21 +1,30 @@
-use std::collections::HashSet;
+//! Adapter between herdr's agent panel and the watcher's card renderer.
+//!
+//! The cards themselves belong to `herdr_agent_watcher::sidebar::view`: header,
+//! task line, model, context/cache/cost, tools and traces are all its work, and
+//! duplicating any of it here would mean two implementations free to drift.
+//! What stays is the part the watcher cannot know — which pane a card is for,
+//! the workspace it lives in, and how herdr's palette paints the result.
 
-use herdr_agent_watcher::daemon::store::PaneTelemetry;
+use herdr_agent_watcher::daemon::store::{CardState, PaneTelemetry};
+use herdr_agent_watcher::sidebar::config::{AgentMark, ToolCallStyle};
 use herdr_agent_watcher::sidebar::layout::LineSpan;
+use herdr_agent_watcher::sidebar::style::AgentAppearances;
 use herdr_agent_watcher::sidebar::view::{
-    call_id, selectable_call, Line, Role, Semantic, Span, Style as WatcherStyle,
+    self, CardCtx, Line, Role, Semantic, Style as WatcherStyle,
 };
 use ratatui::style::{Color, Modifier, Style};
-use serde_json::Value;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::state::Palette;
 use crate::detect::AgentState;
 
-/// Trace rows shown when the card is not the trace anchor. The anchor renders
-/// its whole retained ring instead, so navigation is not limited to a window
-/// the selection can fall outside of.
-const UNFOCUSED_TRACE_ROWS: usize = 5;
+/// Trace rows an unfocused card shows. The anchor renders its whole ring so
+/// navigation is not limited to a window the selection can fall outside of.
+const UNFOCUSED_TRACE_ROWS: u8 = 5;
+
+/// `view::compact_card` is header, task and metrics. Named here because it is
+/// the unit herdr reserves panel space in.
+const COMPACT_CARD_LINES: usize = 3;
 
 pub(crate) struct CardInput<'a> {
     pub workspace: &'a str,
@@ -44,364 +53,137 @@ pub(crate) fn build_card(
     expanded: bool,
 ) -> BuiltCard {
     let width = width.max(1);
-    let mut lines = vec![
-        header(&input, width, expanded),
-        location(&input, width),
-        summary(&input, width),
-    ];
-    if !expanded || input.telemetry.is_none() || body_height <= 3 {
-        lines.truncate(body_height as usize);
-        return BuiltCard {
-            lines,
-            trace_spans: Vec::new(),
-        };
-    }
 
-    let Some(telemetry) = input.telemetry else {
-        return BuiltCard {
-            lines,
-            trace_spans: Vec::new(),
-        };
+    // The watcher only knows panes it has bound. For the rest herdr stands in
+    // with an empty telemetry carrying its own detector state, so an unbound
+    // pane still gets a card and still reads working/blocked rather than
+    // defaulting to idle. Where the watcher *has* bound a pane its lifecycle
+    // events are the better source, so its `card_state` is left alone — and
+    // the real telemetry is borrowed, never cloned, because this runs for
+    // every card on every frame.
+    let stand_in;
+    let telemetry = match input.telemetry {
+        Some(telemetry) => telemetry,
+        None => {
+            let mut telemetry = PaneTelemetry::with_agent(input.name);
+            telemetry.card_state = card_state(input.state, input.seen);
+            if let Some(task) = input.task.filter(|task| !task.is_empty()) {
+                telemetry.title = Some(serde_json::json!({ "title": task }));
+            }
+            stand_in = telemetry;
+            &stand_in
+        }
     };
-    let (trace_lines, local_spans) = trace_rows(telemetry, input.trace_focus);
-    let groups = [
-        model_rows(telemetry),
-        gauge_rows(telemetry, width),
-        tool_rows(telemetry),
-        trace_lines,
-    ];
-    let mut trace_spans = Vec::new();
-    let mut remaining = body_height.saturating_sub(3) as usize;
-    for (index, group) in groups.into_iter().enumerate() {
-        if index == 3 {
-            // The trace group is the only one allowed to render partially, so
-            // it is also the only one whose spans need clipping to what fit.
-            let base = lines.len();
-            lines.extend(group.into_iter().take(remaining));
-            trace_spans = local_spans
-                .into_iter()
-                .filter(|(_, span)| span.start < remaining)
-                .map(|(id, span)| {
-                    (
-                        id,
-                        LineSpan {
-                            start: base + span.start,
-                            height: span.height,
-                        },
-                    )
-                })
-                .collect();
-            break;
-        }
-        if group.len() > remaining {
-            break;
-        }
-        remaining -= group.len();
-        lines.extend(group);
-    }
-    for line in &mut lines {
-        *line = fit_line(std::mem::take(line), width as usize);
-    }
+
+    // herdr's identity, injected through the hook the watcher provides for it:
+    // the watcher's own task line is `cwd › task` and has no notion of a
+    // workspace, which is the one thing a herdr user needs to tell 23 cards
+    // apart.
+    let cwd_label = cwd_label(input.workspace, telemetry);
+
+    let appearances = AgentAppearances::new();
+    let mut ctx = CardCtx {
+        appearances: &appearances,
+        mark: AgentMark::default(),
+        tool_calls: ToolCallStyle::default(),
+        trace_lines: UNFOCUSED_TRACE_ROWS,
+        plan_usage: false,
+        cwd_label: Some(&cwd_label),
+        width,
+        selected: false,
+        trace_focus: input.trace_focus,
+        now_unix_ms: now_unix_ms(),
+    };
+
+    // How much of the panel a card may occupy is herdr's call, not the
+    // watcher's: it owns the list, and an expanded card that swallows the panel
+    // would hide every other agent. Reserve one compact card so a neighbour
+    // always survives.
+    let reserve = if body_height as usize > COMPACT_CARD_LINES {
+        COMPACT_CARD_LINES
+    } else {
+        0
+    };
+    let budget = (body_height as usize).saturating_sub(reserve);
+    let (mut lines, spans) = if expanded {
+        fit_expanded(telemetry, &mut ctx, budget)
+    } else {
+        (view::compact_card(telemetry, &ctx), Vec::new())
+    };
+
+    lines.truncate(body_height as usize);
+    // Spans past the fold would hit-test to rows that are not on screen.
+    let trace_spans = spans
+        .into_iter()
+        .filter(|(_, line)| *line < lines.len())
+        .map(|(id, line)| {
+            (
+                id,
+                LineSpan {
+                    start: line,
+                    height: 1,
+                },
+            )
+        })
+        .collect();
+
     BuiltCard { lines, trace_spans }
 }
 
-fn lifecycle(state: AgentState, seen: bool) -> (&'static str, &'static str, Semantic) {
-    match (state, seen) {
-        (AgentState::Working, _) => ("●", "working", Semantic::Good),
-        (AgentState::Blocked, _) => ("◐", "blocked", Semantic::Warn),
-        (AgentState::Idle, false) => ("✓", "done", Semantic::Good),
-        (AgentState::Idle, true) => ("○", "idle", Semantic::Accent),
-        (AgentState::Unknown, _) => ("?", "unknown", Semantic::Bad),
-    }
-}
-
-fn header(input: &CardInput<'_>, width: u16, expanded: bool) -> Line {
-    let (glyph, label, semantic) = lifecycle(input.state, input.seen);
-    let chevron = if expanded { "▾ " } else { "▸ " };
-    let mut fixed = UnicodeWidthStr::width(chevron) + UnicodeWidthStr::width(glyph) + 1;
-    let show_label = width >= 32;
-    if show_label {
-        fixed += UnicodeWidthStr::width(label) + 1;
-    }
-    let name = truncate(input.name, (width as usize).saturating_sub(fixed));
-    let mut line = vec![
-        Span::new(chevron, WatcherStyle::role(Role::Label)),
-        Span::new(glyph, WatcherStyle::semantic(Role::Body, semantic)),
-        Span::body(" "),
-        Span::new(name, WatcherStyle::role(Role::Emphasis)),
-    ];
-    if show_label {
-        line.push(Span::body(" "));
-        line.push(Span::new(
-            label,
-            WatcherStyle::semantic(Role::Label, semantic),
-        ));
-    }
-    fit_line(line, width as usize)
-}
-
-fn location(input: &CardInput<'_>, width: u16) -> Line {
-    let cwd = input
-        .telemetry
-        .and_then(|telemetry| telemetry.cwd.as_deref())
-        .and_then(|cwd| cwd.trim_end_matches('/').rsplit('/').next())
-        .filter(|cwd| !cwd.is_empty());
-    let telemetry_task = input
-        .telemetry
-        .and_then(|telemetry| telemetry.title.as_ref())
-        .and_then(|title| title.get("title"))
-        .and_then(Value::as_str);
-    let mut text = input.workspace.to_string();
-    if let Some(cwd) = cwd {
-        text.push_str(" · ");
-        text.push_str(cwd);
-    }
-    if let Some(task) = telemetry_task
-        .or(input.task)
-        .filter(|task| !task.is_empty())
-    {
-        text.push_str(" › ");
-        text.push_str(task);
-    }
-    fit_line(
-        vec![
-            Span::body("  "),
-            Span::new(text, WatcherStyle::role(Role::Label)),
-        ],
-        width as usize,
-    )
-}
-
-fn summary(input: &CardInput<'_>, width: u16) -> Line {
-    let Some(telemetry) = input.telemetry else {
-        return fit_line(
-            vec![Span::body("  "), Span::label("— no telemetry")],
-            width as usize,
-        );
-    };
-    let context = telemetry.status.as_ref().and_then(context_percent);
-    let gauge_cells = width.saturating_sub(10).clamp(6, 14);
-    let gauge = context.map_or_else(|| "—".to_string(), |pct| gauge(pct, gauge_cells as usize));
-    let mut line = vec![
-        Span::body("  "),
-        Span::new(gauge, WatcherStyle::semantic(Role::Body, Semantic::Accent)),
-    ];
-    if width >= 25 {
-        if let Some(pct) = context {
-            line.push(Span::body(format!(" {:>3}%", pct.round() as u64)));
-        }
-        line.push(Span::label(format!(
-            " · {} calls",
-            telemetry.tool_call_total
-        )));
-    }
-    fit_line(line, width as usize)
-}
-
-fn model_rows(telemetry: &PaneTelemetry) -> Vec<Line> {
-    let model = telemetry
-        .status
-        .as_ref()
-        .and_then(|status| status.get("modelDisplayName"))
-        .and_then(Value::as_str)
-        .unwrap_or("—");
-    vec![labeled("MODEL", model, Semantic::Accent)]
-}
-
-fn gauge_rows(telemetry: &PaneTelemetry, width: u16) -> Vec<Line> {
-    let status = telemetry.status.as_ref();
-    let context = status.and_then(context_percent);
-    let cache = status.and_then(|status| cache_percent(status, telemetry.agent.as_deref()));
-    let cost = status
-        .and_then(|status| status.get("cost"))
-        .and_then(|cost| cost.get("totalCostUsd"))
-        .and_then(Value::as_f64);
-    let cells = width.saturating_sub(14).clamp(6, 14) as usize;
-    vec![
-        metric("CONTEXT", context, cells, Semantic::Accent),
-        metric("CACHE", cache, cells, Semantic::Good),
-        labeled(
-            "COST",
-            &cost.map_or_else(|| "—".to_string(), |cost| format!("${cost:.2}")),
-            Semantic::Accent,
-        ),
-    ]
-}
-
-fn tool_rows(telemetry: &PaneTelemetry) -> Vec<Line> {
-    let mut tools: Vec<_> = telemetry
-        .tool_counts
-        .iter()
-        .filter(|(_, count)| **count > 0)
-        .collect();
-    tools.sort_by(|left, right| right.1.cmp(left.1).then(left.0.cmp(right.0)));
-    let text = if tools.is_empty() {
-        format!("{} calls", telemetry.tool_call_total)
-    } else {
-        tools
-            .into_iter()
-            .take(3)
-            .map(|(name, count)| format!("{name} {count}"))
-            .collect::<Vec<_>>()
-            .join(" · ")
-    };
-    vec![labeled("TOOLS", &text, Semantic::Accent)]
-}
-
-/// Newest first, at most one row per `toolUseId`. `call_id` and
-/// `selectable_call` come from the watcher so rendering, hit-testing and the
-/// key resolver can never disagree on what counts as a selectable row.
-fn trace_rows(
+/// Expands as far as `budget` allows, shrinking the trace window first.
+///
+/// herdr's agents panel is a split of the sidebar and is often shorter than the
+/// watcher's full expanded card. Rather than refusing to expand — which would
+/// put traces out of reach on short terminals — trade away trace rows through
+/// `CardCtx::trace_lines`, the watcher's own knob for this, and only fall back
+/// to the compact card when even a traceless expansion will not fit. Truncating
+/// mid-card is not an option: it would strip a CONTEXT label off its own detail
+/// row.
+fn fit_expanded(
     telemetry: &PaneTelemetry,
-    focus: Option<&str>,
-) -> (Vec<Line>, Vec<(String, LineSpan)>) {
-    let limit = if focus.is_some() {
-        telemetry.tool_calls.len()
-    } else {
-        UNFOCUSED_TRACE_ROWS
-    };
-    let mut seen: HashSet<&str> = HashSet::new();
-    let mut lines = Vec::new();
-    let mut spans = Vec::new();
-    for call in telemetry.tool_calls.iter().rev() {
-        if lines.len() >= limit {
-            break;
+    ctx: &mut CardCtx<'_>,
+    budget: usize,
+) -> (Vec<Line>, Vec<(String, usize)>) {
+    for trace_lines in (0..=UNFOCUSED_TRACE_ROWS).rev() {
+        ctx.trace_lines = trace_lines;
+        let rendered = view::expanded_card_with_traces(telemetry, ctx);
+        if rendered.0.len() <= budget {
+            return rendered;
         }
-        let id = call_id(call);
-        // A newer occurrence shadows older ones; id-less rows are never
-        // deduplicated because they carry no identity to collide on.
-        if let Some(id) = id {
-            if !seen.insert(id) {
-                continue;
-            }
-        }
-        let selectable = selectable_call(call);
-        let selected = selectable && id.is_some() && id == focus;
-        if selectable {
-            if let Some(id) = id {
-                spans.push((
-                    id.to_string(),
-                    LineSpan {
-                        start: lines.len(),
-                        height: 1,
-                    },
-                ));
-            }
-        }
-        lines.push(trace_row(call, selected));
     }
-    (lines, spans)
+    (view::compact_card(telemetry, ctx), Vec::new())
 }
 
-fn trace_row(call: &Value, selected: bool) -> Line {
-    let failed = call.get("status").and_then(Value::as_str) == Some("failed");
-    let glyph = if failed { "✕" } else { "✓" };
-    let semantic = if failed {
-        Semantic::Bad
-    } else {
-        Semantic::Good
-    };
-    let tool = call.get("tool").and_then(Value::as_str).unwrap_or("?");
-    let args = call.get("args").and_then(Value::as_str).unwrap_or("");
-    let mark = |style: WatcherStyle| {
-        let mut style = style;
-        style.reverse = selected;
-        style
-    };
-    vec![
-        Span::new("  ", mark(WatcherStyle::role(Role::Body))),
-        Span::new(glyph, mark(WatcherStyle::semantic(Role::Body, semantic))),
-        Span::new(" ", mark(WatcherStyle::role(Role::Body))),
-        Span::new(
-            format!("{tool} {args}"),
-            mark(WatcherStyle::role(Role::Label)),
-        ),
-    ]
-}
-
-fn labeled(label: &str, value: &str, semantic: Semantic) -> Line {
-    vec![
-        Span::new(format!("{label:<8}"), WatcherStyle::role(Role::Label)),
-        Span::new(value, WatcherStyle::semantic(Role::Body, semantic)),
-    ]
-}
-
-fn metric(label: &str, percent: Option<f64>, cells: usize, semantic: Semantic) -> Line {
-    let value = percent.map_or_else(
-        || "—".to_string(),
-        |percent| format!("{} {:>3}%", gauge(percent, cells), percent.round() as u64),
-    );
-    labeled(label, &value, semantic)
-}
-
-fn context_percent(status: &Value) -> Option<f64> {
-    status
-        .get("contextWindow")?
-        .get("usedPercentage")?
-        .as_f64()
-        .filter(|percent| percent.is_finite() && *percent >= 0.0)
-}
-
-fn cache_percent(status: &Value, agent: Option<&str>) -> Option<f64> {
-    let usage = status.get("contextWindow")?.get("currentUsage")?;
-    let input = usage.get("inputTokens")?.as_u64()?;
-    let read = usage
-        .get("cacheReadInputTokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let created = usage
-        .get("cacheCreationInputTokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let denominator = match agent {
-        Some("codex") => input,
-        Some("claude" | "claude-code" | "kimi" | "opencode") => input + read + created,
-        _ => return None,
-    };
-    (denominator > 0).then(|| read as f64 * 100.0 / denominator as f64)
-}
-
-fn gauge(percent: f64, cells: usize) -> String {
-    let filled = ((percent.clamp(0.0, 100.0) * cells as f64 / 100.0).round() as usize).min(cells);
-    format!("{}{}", "█".repeat(filled), "░".repeat(cells - filled))
-}
-
-fn fit_line(line: Line, width: usize) -> Line {
-    let mut remaining = width;
-    let mut fitted = Vec::new();
-    for span in line {
-        if remaining == 0 {
-            break;
-        }
-        let text = truncate(&span.text, remaining);
-        remaining = remaining.saturating_sub(UnicodeWidthStr::width(text.as_str()));
-        fitted.push(Span { text, ..span });
+/// herdr's screen detector to the watcher's card vocabulary. `Unknown` maps to
+/// `Idle` rather than `Error`: not having decided yet is not a failure, and
+/// `Error` would paint the card red on every freshly opened pane.
+fn card_state(state: AgentState, seen: bool) -> CardState {
+    match (state, seen) {
+        (AgentState::Working, _) => CardState::Running,
+        (AgentState::Blocked, _) => CardState::Attention,
+        (AgentState::Idle, false) => CardState::Finished,
+        (AgentState::Idle, true) => CardState::Idle,
+        (AgentState::Unknown, _) => CardState::Idle,
     }
-    fitted
 }
 
-fn truncate(text: &str, width: usize) -> String {
-    if UnicodeWidthStr::width(text) <= width {
-        return text.to_string();
+fn cwd_label(workspace: &str, telemetry: &PaneTelemetry) -> String {
+    let cwd = telemetry
+        .cwd
+        .as_deref()
+        .map(|cwd| cwd.trim_end_matches('/'))
+        .and_then(|cwd| cwd.rsplit('/').next())
+        .filter(|cwd| !cwd.is_empty());
+    match cwd {
+        Some(cwd) if cwd != workspace => format!("{workspace} · {cwd}"),
+        _ => workspace.to_string(),
     }
-    if width == 0 {
-        return String::new();
-    }
-    if width == 1 {
-        return "…".to_string();
-    }
-    let mut taken = String::new();
-    let mut used = 0;
-    for character in text.chars() {
-        let character_width = UnicodeWidthChar::width(character).unwrap_or(0);
-        if used + character_width > width - 1 {
-            break;
-        }
-        taken.push(character);
-        used += character_width;
-    }
-    taken.push('…');
-    taken
+}
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64)
 }
 
 pub(crate) fn palette_style(style: WatcherStyle, palette: &Palette) -> Style {
@@ -436,36 +218,40 @@ pub(crate) fn palette_style(style: WatcherStyle, palette: &Palette) -> Style {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, VecDeque};
+    use std::collections::VecDeque;
 
     use super::*;
 
     fn telemetry() -> PaneTelemetry {
         let mut telemetry = PaneTelemetry::with_agent("claude");
         telemetry.cwd = Some("/work/vimeflow-terminal".into());
-        telemetry.status = Some(serde_json::json!({
-            "modelDisplayName": "Claude Sonnet",
-            "contextWindow": {
-                "usedPercentage": 50.0,
-                "currentUsage": {
-                    "inputTokens": 500,
-                    "cacheReadInputTokens": 500,
-                    "cacheCreationInputTokens": 0
-                }
-            },
-            "cost": {"totalCostUsd": 1.25}
-        }));
-        telemetry.title = Some(serde_json::json!({"title": "ship cards"}));
-        telemetry.tool_counts = BTreeMap::from([("Edit".into(), 4), ("Bash".into(), 2)]);
-        telemetry.tool_call_total = 6;
         telemetry.tool_calls = VecDeque::from([
-            serde_json::json!({"tool":"Edit","args":"sidebar.rs","status":"done"}),
-            serde_json::json!({"tool":"Bash","args":"cargo test","status":"done"}),
-            serde_json::json!({"tool":"Read","args":"spec.md","status":"done"}),
-            serde_json::json!({"tool":"Edit","args":"config.rs","status":"done"}),
-            serde_json::json!({"tool":"Bash","args":"cargo clippy","status":"done"}),
+            serde_json::json!({"toolUseId":"a","tool":"Edit","args":"x","status":"done"}),
+            serde_json::json!({"toolUseId":"b","tool":"Bash","args":"y","status":"done"}),
         ]);
         telemetry
+    }
+
+    fn card(
+        telemetry: Option<&PaneTelemetry>,
+        focus: Option<&str>,
+        expanded: bool,
+        height: u16,
+    ) -> BuiltCard {
+        build_card(
+            CardInput {
+                workspace: "vimeflow",
+                name: "claude",
+                task: Some("ship cards"),
+                state: AgentState::Working,
+                seen: true,
+                telemetry,
+                trace_focus: focus,
+            },
+            40,
+            height,
+            expanded,
+        )
     }
 
     fn plain(card: &BuiltCard) -> Vec<String> {
@@ -476,83 +262,141 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_matrix_stays_bounded_and_collapsed_is_three_lines() {
+    fn workspace_identity_survives_delegating_the_card_to_the_watcher() {
+        // The watcher's own task line is `cwd › task` with no workspace; the
+        // cwd_label hook is what keeps 23 cards tellable apart.
         let telemetry = telemetry();
-        for width in [16, 17, 24, 25, 34, 35] {
-            for (state, seen) in [
-                (AgentState::Idle, true),
-                (AgentState::Working, true),
-                (AgentState::Blocked, true),
-                (AgentState::Idle, false),
-            ] {
-                for present in [false, true] {
-                    for expanded in [false, true] {
-                        for height in [3, 4, 7, 8, 13] {
-                            let card = build_card(
-                                CardInput {
-                                    workspace: "workspace-six",
-                                    name: "claude",
-                                    task: Some("fallback task"),
-                                    state,
-                                    seen,
-                                    telemetry: present.then_some(&telemetry),
-                                    trace_focus: None,
-                                },
-                                width,
-                                height,
-                                expanded,
-                            );
-                            assert!(card.lines.len() <= height as usize);
-                            assert!(card.lines.iter().all(|line| {
-                                UnicodeWidthStr::width(
-                                    line.iter()
-                                        .map(|span| span.text.as_str())
-                                        .collect::<String>()
-                                        .as_str(),
-                                ) <= width as usize
-                            }));
-                            if !expanded || !present {
-                                assert_eq!(card.lines.len(), 3);
-                            }
-                            assert!(plain(&card)[1].contains("workspace"));
-                        }
-                    }
-                }
+        let rendered = plain(&card(Some(&telemetry), None, false, 3));
+
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("vimeflow") && line.contains("vimeflow-terminal")),
+            "expected `workspace · cwd` in {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn unbound_panes_still_get_a_card_carrying_herdr_detector_state() {
+        // 20 of 23 panes have no watcher telemetry. Delegating blindly would
+        // drop them; standing in keeps them and keeps their real state.
+        let rendered = plain(&card(None, None, false, 3));
+
+        assert_eq!(rendered.len(), 3, "a stand-in card is still a card");
+        assert!(
+            rendered.iter().any(|line| line.contains("working")),
+            "detector state should reach the glyph, got {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn detector_state_maps_onto_the_watcher_vocabulary() {
+        assert_eq!(card_state(AgentState::Working, true), CardState::Running);
+        assert_eq!(card_state(AgentState::Blocked, true), CardState::Attention);
+        assert_eq!(card_state(AgentState::Idle, false), CardState::Finished);
+        assert_eq!(card_state(AgentState::Idle, true), CardState::Idle);
+        // Not yet decided is not a failure.
+        assert_eq!(card_state(AgentState::Unknown, true), CardState::Idle);
+    }
+
+    #[test]
+    fn expanded_cards_export_trace_spans_within_the_rendered_lines() {
+        let telemetry = telemetry();
+        let built = card(Some(&telemetry), Some("a"), true, 40);
+
+        assert!(
+            !built.trace_spans.is_empty(),
+            "expanded card should export selectable rows"
+        );
+        assert!(
+            built
+                .trace_spans
+                .iter()
+                .all(|(_, span)| span.start < built.lines.len()),
+            "a span past the fold would hit-test to an off-screen row"
+        );
+    }
+
+    #[test]
+    fn short_cards_clip_both_lines_and_spans() {
+        let telemetry = telemetry();
+        for height in [1, 3, 6, 9] {
+            let built = card(Some(&telemetry), Some("a"), true, height);
+            assert!(built.lines.len() <= height as usize);
+            assert!(built
+                .trace_spans
+                .iter()
+                .all(|(_, span)| span.start < built.lines.len()));
+        }
+    }
+
+    #[test]
+    fn an_expanded_card_never_swallows_the_panel() {
+        // The watcher decides what a card contains; herdr decides how much of
+        // the list one card may cover. Without the reserve, the focused agent's
+        // card fills a short panel and every other agent disappears.
+        let telemetry = telemetry();
+        let expanded_len = card(Some(&telemetry), None, true, 200).lines.len();
+        assert!(expanded_len > 3, "fixture should produce a tall card");
+
+        for height in 4..=(expanded_len as u16 + 2) {
+            let built = card(Some(&telemetry), None, true, height);
+            assert!(
+                built.lines.len() <= height as usize,
+                "card overflowed its panel at height {height}"
+            );
+            if (built.lines.len() as u16) == height {
+                panic!("card took the whole panel at height {height}, hiding every neighbour");
             }
         }
     }
 
     #[test]
-    fn expansion_drops_traces_then_tools_then_gauges_then_model() {
-        let telemetry = telemetry();
-        let render = |height| {
-            plain(&build_card(
-                CardInput {
-                    workspace: "w6",
-                    name: "claude",
-                    task: None,
-                    state: AgentState::Working,
-                    seen: true,
-                    telemetry: Some(&telemetry),
-                    trace_focus: None,
-                },
-                35,
-                height,
-                true,
-            ))
-        };
+    fn a_short_panel_trades_trace_rows_rather_than_refusing_to_expand() {
+        // The agents panel is a split of the sidebar and is routinely shorter
+        // than a full expanded card. Refusing to expand there would put traces
+        // out of reach on exactly the terminals that need the space most.
+        let mut telemetry = telemetry();
+        telemetry.tool_calls = (0..UNFOCUSED_TRACE_ROWS)
+            .map(|i| {
+                serde_json::json!({
+                    "toolUseId": format!("id{i}"), "tool": "Edit",
+                    "args": "x", "status": "done"
+                })
+            })
+            .collect();
 
-        assert_eq!(render(3).len(), 3);
-        assert!(render(4).iter().any(|line| line.starts_with("MODEL")));
-        assert!(!render(6).iter().any(|line| line.starts_with("CONTEXT")));
-        assert!(render(7).iter().any(|line| line.starts_with("COST")));
-        assert!(render(8).iter().any(|line| line.starts_with("TOOLS")));
-        assert_eq!(render(13).len(), 13);
+        let full = card(Some(&telemetry), None, true, 200).lines.len();
+        // A panel exactly as tall as the card still owes the reserve, so this
+        // only expands if trace rows are traded away.
+        let tight = card(Some(&telemetry), None, true, full as u16);
+
+        assert!(
+            tight.lines.len() > COMPACT_CARD_LINES,
+            "should still expand, just with fewer trace rows, got {}",
+            tight.lines.len()
+        );
+        assert!(
+            tight.lines.len() <= full - COMPACT_CARD_LINES,
+            "should have shrunk to respect the reserve"
+        );
+    }
+
+    #[test]
+    fn collapsed_cards_export_no_trace_geometry() {
+        let telemetry = telemetry();
+        let built = card(Some(&telemetry), Some("a"), false, 3);
+
+        assert!(
+            built.trace_spans.is_empty(),
+            "a collapsed card renders no trace rows to hit-test"
+        );
     }
 
     #[test]
     fn role_and_semantic_styles_map_to_the_app_palette() {
         let palette = Palette::catppuccin();
+
         assert_eq!(
             palette_style(WatcherStyle::semantic(Role::Body, Semantic::Warn), &palette).fg,
             Some(palette.yellow)
@@ -560,124 +404,10 @@ mod tests {
         assert!(palette_style(WatcherStyle::role(Role::Emphasis), &palette)
             .add_modifier
             .contains(Modifier::BOLD));
-    }
-
-    /// Oldest first, the way the daemon pushes into the ring.
-    fn traced(calls: &[(&str, &str, &str)]) -> PaneTelemetry {
-        let mut telemetry = telemetry();
-        telemetry.tool_calls = calls
-            .iter()
-            .map(|(id, tool, status)| {
-                serde_json::json!({
-                    "toolUseId": id, "tool": tool, "args": "x", "status": status
-                })
-            })
-            .collect();
-        telemetry
-    }
-
-    fn card_with(telemetry: &PaneTelemetry, focus: Option<&str>, height: u16) -> BuiltCard {
-        build_card(
-            CardInput {
-                workspace: "ws",
-                name: "claude",
-                task: None,
-                state: AgentState::Working,
-                seen: true,
-                telemetry: Some(telemetry),
-                trace_focus: focus,
-            },
-            40,
-            height,
-            true,
-        )
-    }
-
-    #[test]
-    fn only_selectable_rows_export_spans() {
-        // An id-less row and an unsettled row both render but must not be
-        // reachable by a hit-test.
-        let telemetry = traced(&[
-            ("", "NoId", "done"),
-            ("a", "Running", "running"),
-            ("b", "Edit", "done"),
-        ]);
-        let card = card_with(&telemetry, None, 40);
-
-        let ids: Vec<&str> = card.trace_spans.iter().map(|(id, _)| id.as_str()).collect();
-        assert_eq!(ids, vec!["b"], "only the settled id-bearing row");
-        assert!(
-            plain(&card).iter().any(|line| line.contains("Running")),
-            "display-only rows still render"
-        );
-    }
-
-    #[test]
-    fn duplicate_ids_render_once_newest_wins() {
-        let telemetry = traced(&[("dup", "Old", "done"), ("dup", "New", "done")]);
-        let card = card_with(&telemetry, None, 40);
-
-        assert_eq!(card.trace_spans.len(), 1);
-        let rendered = plain(&card);
-        assert!(rendered.iter().any(|line| line.contains("New")));
-        assert!(!rendered.iter().any(|line| line.contains("Old")));
-    }
-
-    #[test]
-    fn focus_renders_the_whole_ring_and_reverses_the_selection() {
-        let calls: Vec<(String, &str, &str)> = (0..9)
-            .map(|index| (format!("id{index}"), "Edit", "done"))
-            .collect();
-        let borrowed: Vec<(&str, &str, &str)> = calls
-            .iter()
-            .map(|(id, tool, status)| (id.as_str(), *tool, *status))
-            .collect();
-        let telemetry = traced(&borrowed);
-
-        let unfocused = card_with(&telemetry, None, 40);
-        assert_eq!(
-            unfocused.trace_spans.len(),
-            UNFOCUSED_TRACE_ROWS,
-            "unfocused cards keep the window"
-        );
-
-        let focused = card_with(&telemetry, Some("id2"), 40);
-        assert_eq!(focused.trace_spans.len(), 9, "focus shows the full ring");
-
-        // The selected row, and only it, is reversed.
-        let selected = focused
-            .trace_spans
-            .iter()
-            .find(|(id, _)| id == "id2")
-            .map(|(_, span)| span.start)
-            .expect("id2 is rendered");
-        assert!(focused.lines[selected]
-            .iter()
-            .all(|span| span.style.reverse));
-        for (_, span) in focused.trace_spans.iter().filter(|(id, _)| id != "id2") {
-            assert!(focused.lines[span.start]
-                .iter()
-                .all(|line| !line.style.reverse));
-        }
-    }
-
-    #[test]
-    fn spans_are_clipped_to_the_rows_that_fit() {
-        let calls: Vec<(String, &str, &str)> = (0..9)
-            .map(|index| (format!("id{index}"), "Edit", "done"))
-            .collect();
-        let borrowed: Vec<(&str, &str, &str)> = calls
-            .iter()
-            .map(|(id, tool, status)| (id.as_str(), *tool, *status))
-            .collect();
-        let telemetry = traced(&borrowed);
-
-        // A short card renders only some trace rows; a span past the fold
-        // would hit-test to a row that is not on screen.
-        let card = card_with(&telemetry, Some("id0"), 9);
-        assert!(card
-            .trace_spans
-            .iter()
-            .all(|(_, span)| span.start < card.lines.len()));
+        let mut reversed = WatcherStyle::role(Role::Body);
+        reversed.reverse = true;
+        assert!(palette_style(reversed, &palette)
+            .add_modifier
+            .contains(Modifier::REVERSED));
     }
 }

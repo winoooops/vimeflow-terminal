@@ -540,7 +540,7 @@ mod tests {
 
     use super::super::{app_for_mouse_test, capture_snapshot, mouse, unique_temp_path};
     use crate::{
-        app::state::{AgentPanelSort, DragTarget, Mode},
+        app::state::{AgentPanelSort, AppState, DragTarget, Mode},
         config::SidebarCollapsedModeConfig,
         detect::{Agent, AgentState},
         workspace::Workspace,
@@ -709,6 +709,32 @@ mod tests {
         );
     }
 
+    /// First row of the second agent entry, computed the way the renderer and
+    /// the hit-test both compute it. Card heights belong to the watcher now, so
+    /// tests must ask for the row instead of assuming one.
+    fn second_agent_entry_row(state: &AppState) -> u16 {
+        let detail_area = state.agent_panel_rect();
+        let metrics = crate::ui::agent_panel_scroll_metrics(state, detail_area);
+        let body = crate::ui::agent_panel_items_rect(
+            state,
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
+        let entries = crate::ui::agent_panel_entries(state);
+        assert!(entries.len() >= 2, "fixture needs two agent entries");
+        let first =
+            crate::ui::agent_entry_height_in_body(state, &entries[0], body.width, body.height);
+        let row = body
+            .y
+            .saturating_add(first)
+            .saturating_add(crate::ui::agent_entry_gap(state, 0, entries.len()));
+        assert!(
+            row < body.y + body.height,
+            "second card must fit in the panel for this test to mean anything"
+        );
+        row
+    }
+
     #[test]
     fn clicking_agent_detail_row_switches_to_correct_tab_and_pane() {
         let mut app = app_for_mouse_test();
@@ -739,7 +765,14 @@ mod tests {
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
 
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 16));
+        // Derived, not hardcoded: card heights are the watcher's to decide, so
+        // a literal row here silently retargets whenever a card grows a line.
+        let second_row = second_agent_entry_row(&app.state);
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            2,
+            second_row,
+        ));
 
         assert_eq!(app.state.workspaces[0].active_tab, 1);
         assert_eq!(
@@ -913,10 +946,13 @@ mod tests {
             app.state.view.sidebar_rect,
             app.state.sidebar_section_split,
         );
+        // Derived, not hardcoded: card heights are the watcher's to decide, so
+        // a literal offset here silently retargets whenever a card grows a line.
+        let second_row = second_agent_entry_row(&app.state);
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             detail_area.x + 2,
-            detail_area.y + 6,
+            second_row,
         ));
 
         assert_eq!(app.state.active, Some(1));

@@ -1984,9 +1984,22 @@ mod tests {
             .unwrap();
         let buffer = terminal.backend().buffer();
 
-        assert!(row_text(buffer, body.y, body.width).contains("working"));
+        // Card content is the watcher's now, so assert on what herdr still
+        // owns: which agents are listed, their lifecycle glyph, and the
+        // workspace identity herdr injects through `cwd_label`. The state
+        // *word* only renders at card widths >= 40, which the sidebar never
+        // reaches, so the glyph is the lifecycle signal here.
+        let working = row_text(buffer, body.y, body.width);
+        assert!(working.contains('◐'), "running glyph missing: {working:?}");
         assert!(row_text(buffer, body.y + 1, body.width).contains("working"));
-        assert!(row_text(buffer, body.y + 2, body.width).contains("no telemetry"));
+
+        let blocked = row_text(buffer, body.y + 3, body.width);
+        assert!(
+            blocked.contains('!'),
+            "attention glyph missing: {blocked:?}"
+        );
+        assert!(row_text(buffer, body.y + 4, body.width).contains("blocked"));
+
         assert!(row_text(buffer, body.y + body.height, body.width).contains("+1 idle hidden"));
         assert_eq!(agent_panel_entries(&app).len(), 2);
     }
