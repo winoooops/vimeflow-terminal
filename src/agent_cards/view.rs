@@ -8,7 +8,7 @@
 
 use herdr_agent_watcher::daemon::store::{CardState, PaneTelemetry};
 use herdr_agent_watcher::sidebar::config::{AgentMark, ToolCallStyle};
-use herdr_agent_watcher::sidebar::layout::LineSpan;
+use herdr_agent_watcher::sidebar::layout::{self, LineSpan};
 use herdr_agent_watcher::sidebar::style::AgentAppearances;
 use herdr_agent_watcher::sidebar::view::{
     self, CardCtx, Line, Role, Semantic, Style as WatcherStyle,
@@ -128,6 +128,15 @@ pub(crate) fn build_card(
         (false, _) => (view::compact_card(telemetry, &ctx), Vec::new()),
     };
 
+    // A focused ring is routinely taller than the panel, and herdr scrolls the
+    // agents panel by whole entries, so without this the selection walks off
+    // the bottom and cannot be scrolled to.
+    let spans = if let Some(focus) = input.trace_focus {
+        scroll_traces_into_view(&mut lines, spans, focus, body_height)
+    } else {
+        spans
+    };
+
     lines.truncate(body_height as usize);
     // Spans past the fold would hit-test to rows that are not on screen.
     let trace_spans = spans
@@ -145,6 +154,58 @@ pub(crate) fn build_card(
         .collect();
 
     BuiltCard { lines, trace_spans }
+}
+
+/// Scrolls the trace section so the selected row is on screen, keeping the
+/// card's preamble anchored.
+///
+/// The trace rows are the only scrollable part of a card: the header, task and
+/// metric lines above them are what identify the card, so scrolling the whole
+/// thing would push the reader's anchor off the top. Only rows between the
+/// first trace and the selection are dropped, and the offset comes from the
+/// watcher's own `ensure_visible` so this agrees with how it scrolls its list.
+///
+/// Returns the spans rebased onto the scrolled lines; rows scrolled off the top
+/// are dropped, so they can neither be clicked nor mistaken for visible.
+fn scroll_traces_into_view(
+    lines: &mut Vec<Line>,
+    spans: Vec<(String, usize)>,
+    focus: &str,
+    body_height: u16,
+) -> Vec<(String, usize)> {
+    let Some(first) = spans.iter().map(|(_, line)| *line).min() else {
+        return spans;
+    };
+    let Some(selected) = spans
+        .iter()
+        .find(|(id, _)| id == focus)
+        .map(|(_, line)| *line)
+    else {
+        return spans;
+    };
+    let viewport = (body_height as usize).saturating_sub(first);
+    if viewport == 0 || lines.len() <= body_height as usize {
+        return spans;
+    }
+
+    let offset = usize::from(layout::ensure_visible(
+        0,
+        LineSpan {
+            start: u16::try_from(selected - first).unwrap_or(u16::MAX) as usize,
+            height: 1,
+        },
+        u16::try_from(viewport).unwrap_or(u16::MAX),
+        lines.len() - first,
+    ));
+    if offset == 0 {
+        return spans;
+    }
+
+    lines.drain(first..(first + offset).min(lines.len()));
+    spans
+        .into_iter()
+        .filter_map(|(id, line)| (line >= first + offset).then(|| (id, line - offset)))
+        .collect()
 }
 
 /// Expands as far as `budget` allows, shrinking the trace window first.
@@ -483,6 +544,68 @@ mod tests {
                 "focused card rendered no selectable trace rows at height {height}"
             );
         }
+    }
+
+    #[test]
+    fn the_selected_trace_stays_on_screen_however_deep_it_sits() {
+        // A focused ring is routinely taller than the panel and herdr scrolls
+        // the agents panel by whole entries, so a selection deep in the ring
+        // has no way to be scrolled to. It must be brought into view instead.
+        let mut telemetry = telemetry();
+        telemetry.tool_calls = (0..40)
+            .map(|i| {
+                serde_json::json!({
+                    "toolUseId": format!("id{i}"), "tool": "Edit",
+                    "args": "x", "status": "done"
+                })
+            })
+            .collect();
+
+        let height = 16u16;
+        // Rendered newest-first, so id0 is the OLDEST and sits deepest.
+        for id in ["id39", "id20", "id0"] {
+            let built = card(Some(&telemetry), Some(id), true, height);
+            let found = built.trace_spans.iter().find(|(span_id, _)| span_id == id);
+            let (_, span) = found.unwrap_or_else(|| {
+                panic!(
+                    "selection {id} not rendered; card has {} lines and {} spans",
+                    built.lines.len(),
+                    built.trace_spans.len()
+                )
+            });
+            assert!(
+                span.start < built.lines.len() && span.start < height as usize,
+                "selection {id} landed at line {} of a {}-line card in a {height}-row panel",
+                span.start,
+                built.lines.len()
+            );
+        }
+    }
+
+    #[test]
+    fn scrolling_to_a_deep_trace_keeps_the_cards_preamble() {
+        // Only the trace rows scroll. The header and task lines are what tell
+        // the reader which card they are in.
+        let mut telemetry = telemetry();
+        telemetry.tool_calls = (0..40)
+            .map(|i| {
+                serde_json::json!({
+                    "toolUseId": format!("id{i}"), "tool": "Edit",
+                    "args": "x", "status": "done"
+                })
+            })
+            .collect();
+
+        let deep = card(Some(&telemetry), Some("id0"), true, 16);
+        let rendered = plain(&deep);
+        assert!(
+            rendered.iter().any(|line| line.contains("CLAUDE")),
+            "header scrolled away: {rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line.contains("vimeflow")),
+            "workspace identity scrolled away: {rendered:?}"
+        );
     }
 
     #[test]
