@@ -64,18 +64,27 @@ Everything herdr v0.8.0 does, plus:
 - **built-in agent watcher** — coding-agent observability (transcript
   watchers, lifecycle, metrics, notifications) is compiled into the binary and
   runs with the server. No plugin to install, link, or keep in sync. CLI under
-  `herdr watcher`.
+  `vimeflow watcher`.
 - **automatic pane titles** — pane labels follow the agent's session title as
   it works. A manual rename always wins and is never overwritten.
 - **Agents sidebar cards** — the sidebar's Agents section renders agent cards
   (lifecycle plus context, cache, cost, model, tools, traces) instead of a
-  token-row list. The focused agent's card auto-expands. Configurable live:
+  token-row list. The cards are drawn by the agent watcher itself, so there is
+  one implementation of what a card looks like, not two. Configurable live:
 
   ```toml
-  [ui.sidebar]
+  [ui]
   agents_view = "cards"    # or "legacy" for herdr's row list
   agents_hide_idle = false
   ```
+
+- **keyboard agent navigation** — `prefix+a` moves focus into the Agents
+  sidebar. Two zones: `j`/`k` walk the cards and `l` descends into the
+  selected card's tool-call traces, where `o` opens a detail panel showing
+  status, duration, timestamp and the full retained arguments. Moving the card
+  cursor deliberately does *not* change pane focus — only Enter commits — so
+  walking a long list never throws the main view around. Mouse works
+  throughout: click a trace row to select it, click again to open it.
 
 - **no phone-home** — self-update, hosted manifest fetches, and product
   announcements are deliberately disabled. This fork will never install stock
@@ -88,11 +97,6 @@ the upstream feature set.
 
 No dates. Roughly in order:
 
-- **card cursor model** — section focus and `j`/`k`/`o`/`z` navigation for the
-  Agents cards, replacing today's expand-follows-focus behavior.
-- **notification island** — a compact top-center overlay aggregating agent
-  working state (herdr's OSC 9;4 progress unioned with watcher lifecycle) and
-  the notification queue.
 - **pane cards and the worktree flow** — card-style pane headers with agent
   glyph, state, and worktree badge; and *"new agent pane in a fresh worktree"*
   collapsed into a single action that splits the current tab instead of
@@ -103,35 +107,109 @@ No dates. Roughly in order:
   worktree-scoped file list, hunk-level rendering and navigation, read-only
   first.
 
-Deliberately **not** done yet: the branding rename. The binary, config paths,
-socket names, and `HERDR_*` environment variables are all still `herdr`, so
-existing plugins and operator workflows keep working. See the deferred
+Still partly deferred: the branding rename covers the executable and the
+config and state directories, but **not** the `HERDR_*` environment variables
+or the `herdr.sock` / `herdr-client.sock` filenames. Those are the integration
+protocol — `herdr-agent-watcher` alone reads nine of those variables — so
+renaming them would break plugins for no user-visible gain. See the deferred
 branding surface in [`FORK.md`](FORK.md).
 
 ## try it
 
 There are no prebuilt binaries, no installer, and no release channel. Build
-from source:
+from source.
+
+**Prerequisites.** Rust 1.96.1 (pinned in `rust-toolchain.toml`, so `rustup`
+picks it up automatically) and **Zig 0.15.2** to compile the vendored
+libghostty-vt. A *newer* Zig on `PATH` will fail — the version is exact. On a
+cold Zig cache, run `scripts/preseed_zig_cache.sh` first, or the build dies
+fetching a dependency tarball.
 
 ```bash
 git clone https://github.com/winoooops/vimeflow-terminal
 cd vimeflow-terminal
+scripts/preseed_zig_cache.sh      # only needed on a cold Zig cache
 cargo build --release
-./target/release/herdr
+./target/release/vimeflow
 ```
 
-Requires Rust 1.96.1 (pinned in `rust-toolchain.toml`) and **Zig 0.15.2** to
-compile the vendored libghostty-vt — a newer Zig on `PATH` will fail. On a cold
-Zig cache, run `scripts/preseed_zig_cache.sh` first.
+The executable is `vimeflow`, not `herdr`. Put it on your `PATH` if you want:
 
-The binary is still named `herdr` and reads `~/.config/herdr`, so it will share
-state with a stock herdr install. Point `HERDR_SOCKET_PATH` elsewhere if you
-want the two to coexist.
+```bash
+ln -s "$PWD/target/release/vimeflow" ~/.local/bin/vimeflow
+```
+
+### coexisting with herdr
+
+vimeflow keeps its own directories, so an installed herdr is untouched:
+
+| | vimeflow | upstream herdr |
+| --- | --- | --- |
+| executable | `vimeflow` | `herdr` |
+| config | `~/.config/vimeflow/` | `~/.config/herdr/` |
+| state | `~/.local/state/vimeflow/` | `~/.local/state/herdr/` |
+
+On its **first interactive launch**, if `~/.config/vimeflow` does not exist and
+`~/.config/herdr` does, vimeflow copies it across — config, sessions, plugin
+registry, Claude bridge install — and leaves the original alone. The two are
+independent from then on; neither sees the other's later edits.
+
+`HERDR_*` environment variables and the `herdr.sock` socket filenames are
+shared on purpose, so plugins keep working. This means the two must not run
+against the same session directory at once.
+
+### configuration
+
+```bash
+vimeflow --default-config > ~/.config/vimeflow/config.toml
+```
+
+Every setting is listed and **commented out**, showing its default. Uncomment
+only what you want to change. Fork-only settings are marked as such and
+gathered at the end of the file.
+
+### a gotcha worth knowing
+
+If your cards all read `— no telemetry`, the standalone agent-watcher *plugin*
+is enabled and is fighting the built-in one. The plugin launches its own daemon
+at server startup, which supersedes the embedded watcher; the embedded one then
+exits and, by design, does not restart. Disable the plugin:
+
+```bash
+vimeflow plugin disable herdr-agent-watcher
+vimeflow server stop && vimeflow      # restart to pick it up
+```
+
+The plugin's own `open-sidebar` keybinding keeps working either way — vimeflow
+routes it to the built-in Agents sidebar.
+
+### running a server without attaching
+
+`vimeflow` starts a server and attaches to it. To restart a server without
+losing your terminal, stop it first — this kills every pane in the session:
+
+```bash
+vimeflow server stop
+vimeflow
+```
+
+### tests
 
 ```bash
 just test     # unit tests + maintenance checks
 just check    # the full gate: lint, tests, Windows-target clippy
 ```
+
+Without `just`, the fork's CI command is:
+
+```bash
+cargo nextest run --locked -E 'not binary(live_handoff)'   # macOS
+cargo nextest run --locked                                  # Linux
+```
+
+`live_handoff` is excluded on macOS, matching upstream. Integration binaries
+that spawn a real server run one at a time (see `.config/nextest.toml`); they
+compete for descriptors and fs watches otherwise and time out.
 
 ## how this fork tracks herdr
 

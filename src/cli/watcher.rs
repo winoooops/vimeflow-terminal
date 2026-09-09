@@ -48,7 +48,7 @@ mod platform {
             Some("kimi-consent") => kimi_consent(&args[1..]),
             _ => {
                 eprintln!(
-                    "usage: herdr watcher <status|doctor|sidebar|claude-bridge|kimi-consent>"
+                    "usage: vimeflow watcher <status|doctor|sidebar|claude-bridge|kimi-consent>"
                 );
                 Ok(2)
             }
@@ -162,7 +162,7 @@ mod platform {
                 Ok(herdr_agent_watcher::agents::claude_bridge::cli_claude_bridge(args))
             }
             _ => {
-                eprintln!("usage: herdr watcher claude-bridge <enable|disable>");
+                eprintln!("usage: vimeflow watcher claude-bridge <enable|disable>");
                 Ok(2)
             }
         }
@@ -191,7 +191,7 @@ mod platform {
                 Ok(i32::from(!enabled))
             }
             _ => {
-                eprintln!("usage: herdr watcher kimi-consent <on|off|status>");
+                eprintln!("usage: vimeflow watcher kimi-consent <on|off|status>");
                 Ok(2)
             }
         }

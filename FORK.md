@@ -205,11 +205,12 @@ the top of the file:
 | `src/api/schema/tests.rs` | Keep the generated schema canonically ordered when the watcher enables `serde_json/preserve_order`. | `502f2f6b993e62e99ad98b97a71e813a0e258bc3` |
 | `src/config/model.rs` | Add startup-only native watcher and title-sync sections plus live tab-island configuration, notification policy, panel keybinding, and island-anchored toast defaults. | `c3c70979`, dynamic island capsule (this commit), island motion (this commit), island active title (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), emoji island bell (this commit), island toast placement (this commit) |
 | `src/config/keybinds.rs` | Parse, validate, and expose the rebindable island-panel toggle action. | island notification panel (this commit) |
-| `src/config/io.rs` | Recognize native feature sections and diagnose legacy Agents-row settings and invalid compact-rail and island bell mark overrides from raw startup/live TOML. | `c3c70979`, `b8a6406c`, compact-rail agent marks (this commit), island notification bell (this commit) |
+| `src/logging.rs` | Point the default tracing filter at the renamed crate root; a bin rename moves every target, and a stale directive silently disables all file logging. | vimeflow rename (this commit) |
+| `src/config/io.rs` | Recognize native feature sections and diagnose legacy Agents-row settings and invalid compact-rail and island bell mark overrides from raw startup/live TOML; own the fork's app directory names and the one-time seed from an installed herdr. | `c3c70979`, `b8a6406c`, compact-rail agent marks (this commit), island notification bell (this commit), vimeflow rename (this commit) |
 | `src/config.rs` | Export the fork's Agents-card view, compact-rail leading, and tab-island configuration types. | `b8a6406c`, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit), island notification arrivals (this commit) |
 | `src/config/sidebar.rs` | Add live Agents-card, idle-filter, and compact-rail number and agent-mark settings beside legacy row configuration. | `b8a6406c`, compact-rail numbers, compact-rail agent marks (this commit) |
 | `src/server/headless.rs` | Own the embedded watcher, telemetry ingestion, and title-sync lifecycles across normal and handoff server paths, reconcile shared island-panel state from foreground-client geometry, own foreground input-source switching, keep island arrivals out of stock notification delivery, reject retained PTY patching under the panel, warn about enabled standalone twins, and keep test construction cfg-clean on Windows. | `dd08df50`, `e006a1ea`, `b3aff323`, `95a7db2a`, PR #6, island motion (this commit), island notification arrivals (this commit), island panel geometry reconciliation (this commit), island notification review fixes (this commit), island notification single-client follow-up (this commit) |
-| `src/cli/spec.rs` | Describe the native watcher command group and its supported subcommands. | `dded4c73` |
+| `src/cli/spec.rs` | Describe the native watcher command group and its supported subcommands, and name the program `vimeflow` in generated usage. | `dded4c73`, vimeflow rename (this commit) |
 | `src/main.rs` | Register the Unix-only native title-sync and Agent-card modules. | `f4af78b5`, `95a7db2a` |
 | `src/events.rs` | Return blocking title-reader results to the server thread for identity-checked application. | `e006a1ea` |
 | `src/ui.rs` | Export shared Agent-card geometry to sidebar input handling and compute tab-island row, panel, hit geometry, and notification-driven one-tab visibility, with shared desktop toast render and hit geometry. | `158aabf9`, dynamic island capsule (this commit), island motion (this commit), island notification arrivals (this commit), island notification panel (this commit), island notification review fixes (this commit), island panel geometry reconciliation (this commit), island notification marvin fixes (this commit), island toast placement (this commit) |
@@ -238,19 +239,47 @@ For each upstream release:
 5. Merge the sync PR into `main`; never auto-resolve conflicts or commit fork
    work directly to `master`.
 
-## Deferred branding rename surface
+## Branding rename surface
 
-The M0b bootstrap intentionally keeps the `herdr` binary/CLI name, socket and
-state/config paths, environment variables, and command grammar so existing
-Tier-1 plugins and operator workflows remain compatible.
+### Renamed
 
-A later, separately specified branding pass must inventory and migrate:
+- The executable is `vimeflow` (`[[bin]]` in `Cargo.toml`). The Cargo *package*
+  is still `herdr`, so `herdr::` paths in `tests/` and the registry above keep
+  resolving.
+- `config::io::app_dir_name()` is `vimeflow` / `vimeflow-dev`, which moves the
+  config dir, state dir, sessions, sockets and plugin state together.
+- User-facing command strings: clap's program name, `--help` usage, the
+  `session::local_attach_command` / `stop_command_for` builders, and the "run
+  `…`" hints in error messages.
 
-- Cargo package, binary, release asset, installer, and package-manager names;
-- user-facing Herdr strings, help text, documentation, icons, and logos;
-- socket/session identifiers, config/state/cache paths, and `HERDR_*`
-  environment variables;
-- plugin command contracts and a compatibility alias/migration period.
+`config::io::migrate_from_upstream_once()` seeds the fork's directories from an
+installed herdr on the first interactive launch, copying rather than moving. It
+runs only on that path — every subcommand, the headless server and the thin
+client also reach `main()`, and copying a plugin tree on each would be both
+wasteful and a surprising write to the user's state directory.
+
+Two consequences worth remembering, both found by tests rather than review:
+
+- **Tracing targets follow the bin name, not the package name.** Renaming the
+  executable moved every target from `herdr::…` to `vimeflow::…`, so the
+  default filter in `src/logging.rs` had to change with it. A stale directive
+  there matches nothing and silently disables all file logging.
+- **The directory name is three bytes longer**, and macOS caps a Unix socket
+  path at 104 bytes. Anything that builds a socket path under the app dir now
+  has three bytes less headroom; `tests/watcher_cli.rs` had to shorten its
+  temporary root to stay under the limit.
+
+### Deliberately not renamed
+
+`HERDR_*` environment variables and the `herdr.sock` / `herdr-client.sock`
+filenames are the integration protocol. `herdr-agent-watcher` alone reads nine
+of those variables and is pinned to a released tag, so renaming them breaks
+plugins for no user-visible gain. `HERDR_LOG` keeps its name; only the
+directive value inside it names the crate.
+
+A later pass would still need to cover release asset, installer and
+package-manager names, remaining user-facing "Herdr" prose, icons and logos,
+and a compatibility alias period if the environment protocol is ever renamed.
 
 ## M0b boundary note
 

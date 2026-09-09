@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

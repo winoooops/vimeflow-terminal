@@ -51,6 +51,7 @@ Modified upstream files
 - src/config.rs
 - src/config/sidebar.rs
 - src/events.rs
+- src/logging.rs
 - src/main.rs
 - src/server/headless.rs
 - src/ui.rs
