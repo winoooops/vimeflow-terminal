@@ -154,6 +154,7 @@ impl AppState {
             return;
         };
         self.agent_trace_focus = Some((pane, id));
+        self.anchor_card_to_top(pane);
     }
 
     pub(super) fn move_trace_selection(&mut self, delta: isize) {
@@ -177,6 +178,29 @@ impl AppState {
     /// including across cards, so this also retargets the anchor.
     pub(super) fn select_trace(&mut self, pane: PaneId, id: &str) {
         self.agent_trace_focus = Some((pane, id.to_string()));
+        self.anchor_card_to_top(pane);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn select_trace_for_test(&mut self, pane: PaneId, id: &str) {
+        self.select_trace(pane, id);
+    }
+
+    /// Scrolls the anchor card to the top of the panel.
+    ///
+    /// Descending makes a card grow from three lines to its whole ring, and the
+    /// panel renders a card only when it fits in the rows still left below it —
+    /// so a card near the bottom becomes too tall to draw and vanishes exactly
+    /// as the reader descends into it. Starting the list at the anchor gives it
+    /// the full panel height, which is the budget `build_card` already clips
+    /// to. Any index is a legal start, so this is never clamped away.
+    fn anchor_card_to_top(&mut self, pane: PaneId) {
+        if let Some(index) = crate::ui::agent_panel_entries(self)
+            .iter()
+            .position(|entry| entry.pane_id == pane)
+        {
+            self.agent_panel_scroll = index;
+        }
     }
 
     /// `(pane, toolUseId)` for the trace row under the cursor. Callers must

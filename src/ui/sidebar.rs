@@ -1953,6 +1953,62 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn descending_into_the_last_card_still_renders_it() {
+        // A card near the bottom grows from three lines to its whole ring on
+        // descend, and the panel draws a card only when it fits in the rows
+        // still left below it — so it used to vanish exactly as the reader
+        // descended into it.
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = (0..6)
+            .map(|i| Workspace::test_new(&format!("ws{i}")))
+            .collect();
+        app.ensure_test_terminals();
+        for ws_idx in 0..app.workspaces.len() {
+            let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            terminal.state = AgentState::Working;
+        }
+        app.agents_view = crate::config::AgentsViewConfig::Cards;
+        app.active = Some(0);
+
+        let area = Rect::new(0, 0, 36, 40);
+        app.view.sidebar_rect = area;
+        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let body = agent_panel_items_rect(&app, agent_area, false);
+
+        let entries = agent_panel_entries(&app);
+        let last = entries.len() - 1;
+        let last_pane = entries[last].pane_id;
+
+        // Descend into the bottom card, the way `l` does.
+        app.agent_card_cursor = Some(last_pane);
+        app.select_trace_for_test(last_pane, "id0");
+
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let rendered: Vec<String> = (0..body.height)
+            .map(|row| row_text(buffer, body.y + row, body.width))
+            .collect();
+        assert!(
+            rendered.iter().any(|line| line.contains("CLAUDE")),
+            "the anchor card must be drawn, got {rendered:?}"
+        );
+        assert_eq!(
+            app.agent_panel_scroll, last,
+            "the anchor should start the list so it gets the full panel height"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn keyboard_cursor_takes_the_highlight_from_the_focused_pane() {
         // The cursor deliberately does not move pane focus, so a highlight tied
         // to focus would sit still while j/k walked somewhere else.
