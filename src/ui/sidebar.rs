@@ -1786,7 +1786,14 @@ fn render_agent_cards(
         if row_y.saturating_add(height) > body_bottom {
             break;
         }
-        let active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
+        // The keyboard cursor takes the highlight while it is up, for the same
+        // reason it takes expansion: it does not move pane focus, so without
+        // this the highlight would sit on the focused pane while j/k walked
+        // somewhere else entirely.
+        let active = match app.agent_card_cursor {
+            Some(cursor) => cursor == detail.pane_id,
+            None => app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id),
+        };
         let row_style = if active {
             Style::default().bg(app.palette.surface_dim)
         } else {
@@ -1942,6 +1949,56 @@ mod tests {
                 .len(),
             Agent::ALL.len()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keyboard_cursor_takes_the_highlight_from_the_focused_pane() {
+        // The cursor deliberately does not move pane focus, so a highlight tied
+        // to focus would sit still while j/k walked somewhere else.
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        for ws_idx in [0, 1] {
+            let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            terminal.state = AgentState::Working;
+        }
+        app.agents_view = crate::config::AgentsViewConfig::Cards;
+        app.active = Some(0);
+
+        let area = Rect::new(0, 0, 36, 30);
+        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let body = agent_panel_items_rect(&app, agent_area, false);
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 2);
+        let first_height = agent_entry_height_in_body(&app, &entries[0], body.width, body.height);
+        let second_row = body.y + first_height + agent_entry_gap(&app, 0, entries.len());
+
+        let highlight_bg = |app: &crate::app::state::AppState, row: u16| {
+            let mut terminal = Terminal::new(TestBackend::new(36, 30)).unwrap();
+            terminal
+                .draw(|frame| render_sidebar(app, &TerminalRuntimeRegistry::new(), frame, area))
+                .unwrap();
+            terminal.backend().buffer()[(body.x, row)].style().bg
+        };
+
+        // Focus alone highlights the first card.
+        assert_eq!(highlight_bg(&app, body.y), Some(app.palette.surface_dim));
+
+        // Cursor on the second card moves the highlight there, without the
+        // focused pane having changed.
+        app.agent_card_cursor = Some(entries[1].pane_id);
+        assert_eq!(
+            highlight_bg(&app, second_row),
+            Some(app.palette.surface_dim)
+        );
+        assert_ne!(highlight_bg(&app, body.y), Some(app.palette.surface_dim));
+        assert_eq!(app.active, Some(0), "cursor must not move pane focus");
     }
 
     #[cfg(unix)]

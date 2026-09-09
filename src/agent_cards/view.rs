@@ -117,10 +117,15 @@ pub(crate) fn build_card(
         0
     };
     let budget = (body_height as usize).saturating_sub(reserve);
-    let (mut lines, spans) = if expanded {
-        fit_expanded(telemetry, &mut ctx, budget)
-    } else {
-        (view::compact_card(telemetry, &ctx), Vec::new())
+    let (mut lines, spans) = match (expanded, input.trace_focus.is_some()) {
+        // A focused card renders its whole ring, and the watcher does that
+        // regardless of `trace_lines` — so shrinking that knob cannot make it
+        // fit, and trying would fall through to the traceless compact card:
+        // descending into traces would render no traces. The reserve yields
+        // instead; this is the card the reader descended into.
+        (true, true) => view::expanded_card_with_traces(telemetry, &ctx),
+        (true, false) => fit_expanded(telemetry, &mut ctx, budget),
+        (false, _) => (view::compact_card(telemetry, &ctx), Vec::new()),
     };
 
     lines.truncate(body_height as usize);
@@ -439,6 +444,44 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn descending_into_traces_always_renders_trace_rows() {
+        // The watcher renders the whole ring whenever trace_focus is set and
+        // ignores trace_lines doing it. Shrinking that knob to fit therefore
+        // changes nothing, runs out of options, and falls back to the compact
+        // card — so `l` would enter the trace zone and show no traces.
+        let mut telemetry = telemetry();
+        telemetry.tool_calls = (0..12)
+            .map(|i| {
+                serde_json::json!({
+                    "toolUseId": format!("id{i}"), "tool": "Edit",
+                    "args": "x", "status": "done"
+                })
+            })
+            .collect();
+
+        // The card has a fixed preamble before its first trace row; below that
+        // no panel can show one. Derive it rather than assume it.
+        let roomy = card(Some(&telemetry), Some("id0"), true, 200);
+        let first_trace = roomy
+            .trace_spans
+            .iter()
+            .map(|(_, span)| span.start)
+            .min()
+            .expect("a focused card should render trace rows when given room");
+
+        // Every height that can fit a trace row must actually show one. These
+        // are the heights that used to collapse to a traceless compact card,
+        // because the focused ring is far taller than the panel.
+        for height in [first_trace as u16 + 1, 20, 40] {
+            let built = card(Some(&telemetry), Some("id0"), true, height);
+            assert!(
+                !built.trace_spans.is_empty(),
+                "focused card rendered no selectable trace rows at height {height}"
+            );
         }
     }
 
