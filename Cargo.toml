@@ -1,12 +1,14 @@
 # Modified from herdr by the vimeflow project — see FORK.md
 [package]
+# The package keeps upstream's name so `herdr::` paths in tests and the
+# upstream-edit registry stay meaningful; only the executable is renamed.
 name = "herdr"
 version = "0.8.0"
 edition = "2021"
 build = "build.rs"
 description = "terminal workspace manager for AI coding agents"
 license = "Apache-2.0"
-repository = "https://github.com/herdrdev/herdr"
+repository = "https://github.com/winoooops/vimeflow-terminal"
 homepage = "https://herdr.dev"
 keywords = ["terminal", "tui", "ai", "agents", "multiplexer"]
 categories = ["command-line-utilities"]
@@ -19,6 +21,13 @@ include = [
     "LICENSE",
     "Cargo.toml",
 ]
+
+# Renaming the executable is what lets the fork sit alongside an installed
+# upstream herdr. The `HERDR_*` environment protocol is deliberately not
+# renamed with it — herdr-agent-watcher reads nine of those variables.
+[[bin]]
+name = "vimeflow"
+path = "src/main.rs"
 
 [dependencies]
 base64 = "0.22.1"

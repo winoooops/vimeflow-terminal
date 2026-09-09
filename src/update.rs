@@ -2,7 +2,7 @@
 //! Self-update mechanism.
 //!
 //! Checks the hosted herdr.dev update manifest for newer versions.
-//! Manual `herdr update` downloads and installs the binary.
+//! Manual `vimeflow update` downloads and installs the binary.
 //! Background checks only surface availability and release notes.
 //! Uses `curl` as a subprocess for HTTP — no additional Rust HTTP dependencies.
 //! JSON parsing uses serde_json (already in deps for persistence).
@@ -841,7 +841,7 @@ fn plan_running_server_updates(
         )
         .map_err(|err| {
             format!(
-                "failed to read status for herdr target {} at {}: {err}. stop it with `{}` and run `herdr update` again",
+                "failed to read status for herdr target {} at {}: {err}. stop it with `{}` and run `vimeflow update` again",
                 target.label,
                 target.socket_path.display(),
                 target.stop_command
@@ -850,7 +850,7 @@ fn plan_running_server_updates(
             Some(server) => server,
             None if target.must_be_running => {
                 return Err(format!(
-                        "herdr target {} looked running, but its status API did not respond at {}. stop it with `{}` and run `herdr update` again",
+                        "herdr target {} looked running, but its status API did not respond at {}. stop it with `{}` and run `vimeflow update` again",
                     target.label,
                     target.socket_path.display(),
                     target.stop_command
@@ -858,7 +858,7 @@ fn plan_running_server_updates(
             }
             None if client_protocol_server_is_running_at(&target.client_socket_path) => {
                 return Err(format!(
-                    "herdr target {} has a client socket, but its status API did not respond at {}. stop it with `{}` and run `herdr update` again",
+                    "herdr target {} has a client socket, but its status API did not respond at {}. stop it with `{}` and run `vimeflow update` again",
                     target.label,
                     target.socket_path.display(),
                     target.stop_command
@@ -876,7 +876,7 @@ fn plan_running_server_updates(
 
     if plans.is_empty() && target_client_protocol_server_is_running()? {
         return Err(format!(
-            "a herdr server is listening, but its status API is unavailable; try `{}`, or stop the old server process manually, then run `herdr update` again",
+            "a herdr server is listening, but its status API is unavailable; try `{}`, or stop the old server process manually, then run `vimeflow update` again",
             crate::session::local_stop_command()
         ));
     }
@@ -1009,7 +1009,7 @@ fn prompt_to_stop_old_servers_before_update(
 ) -> Result<bool, String> {
     if !io::stdin().is_terminal() {
         return Err(
-            "one or more Herdr sessions must stop for this update. Stop running Herdr sessions when ready, then run `herdr update` again from an interactive terminal."
+            "one or more Herdr sessions must stop for this update. Stop running Herdr sessions when ready, then run `vimeflow update` again from an interactive terminal."
                 .to_string(),
         );
     }
@@ -1280,7 +1280,7 @@ fn prompt_to_stop_old_server_after_failed_handoff(
     eprintln!("  server: v{}", version_label(status.version.as_deref()));
     eprintln!("  installed: {}", release.label());
     eprintln!(
-        "you can keep using the old server, or stop it now so the next `herdr` start uses {}.",
+        "you can keep using the old server, or stop it now so the next `vimeflow` start uses {}.",
         release.label()
     );
     eprintln!("stopping the old server will exit its pane processes.");
@@ -1753,7 +1753,7 @@ pub(crate) fn update_install_command() -> &'static str {
 pub(crate) fn update_install_instruction(install_command: &str) -> String {
     match install_command {
         HERDR_UPDATE_COMMAND => {
-            "detach, run `herdr update`, then follow its restart guidance".to_string()
+            "detach, run `vimeflow update`, then follow its restart guidance".to_string()
         }
         HOMEBREW_UPDATE_COMMAND => {
             "detach, run `brew update && brew upgrade herdr`, then restart this Herdr session when ready".to_string()
@@ -1957,7 +1957,7 @@ fn homebrew_cellar_keg_root(path: &Path) -> Option<PathBuf> {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Manual self-update command (`herdr update`).
+/// Manual self-update command (`vimeflow update`).
 pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
     if updates_disabled() {
         return Err(FORK_UPDATE_DISABLED_MESSAGE.into());
@@ -1967,7 +1967,7 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
     #[cfg(windows)]
     if channel == UpdateChannel::Stable {
         return Err(
-            "Windows builds are preview-only for now; run `herdr channel set preview`".into(),
+            "Windows builds are preview-only for now; run `vimeflow channel set preview`".into(),
         );
     }
 
@@ -2005,7 +2005,7 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
     }
 
     if running_inside_herdr() {
-        return Err("run `herdr update` outside herdr after detaching from the session".into());
+        return Err("run `vimeflow update` outside herdr after detaching from the session".into());
     }
 
     eprintln!("checking {} channel for updates...", channel.as_str());
@@ -2062,7 +2062,7 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
             && !prompt_to_complete_plain_update(&server_update_decisions, &release)?
         {
             eprintln!("Herdr was not updated.");
-            eprintln!("Stop running Herdr sessions when ready, then run `herdr update` again.");
+            eprintln!("Stop running Herdr sessions when ready, then run `vimeflow update` again.");
             return Ok(current);
         }
         install_downloaded_update(downloaded_update)?;
@@ -2629,7 +2629,7 @@ mod tests {
     fn update_install_instruction_distinguishes_install_from_restart() {
         assert_eq!(
             update_install_instruction(HERDR_UPDATE_COMMAND),
-            "detach, run `herdr update`, then follow its restart guidance"
+            "detach, run `vimeflow update`, then follow its restart guidance"
         );
         assert_eq!(
             update_install_instruction(HOMEBREW_UPDATE_COMMAND),
@@ -2901,7 +2901,7 @@ mod tests {
             "unexpected error: {err}"
         );
         assert!(
-            err.contains("herdr session stop work"),
+            err.contains("vimeflow session stop work"),
             "unexpected error: {err}"
         );
     }

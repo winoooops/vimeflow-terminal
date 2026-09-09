@@ -230,7 +230,7 @@ fn ensure_remote_server_running() -> io::Result<()> {
             return Ok(());
         }
         return Err(io::Error::other(
-            "remote herdr server must restart before this bridge can attach; rerun `herdr --remote` from an interactive terminal to approve stopping it",
+            "remote herdr server must restart before this bridge can attach; rerun `vimeflow --remote` from an interactive terminal to approve stopping it",
         ));
     }
 
@@ -1441,7 +1441,7 @@ fn warn_if_remote_bin_not_on_path(ssh: &RemoteSsh) -> io::Result<()> {
     }
 
     eprintln!(
-        "herdr: installed remote binary to ~/.local/bin/herdr, but the remote shell does not resolve `herdr` to that path"
+        "herdr: installed remote binary to ~/.local/bin/herdr, but the remote shell does not resolve `vimeflow` to that path"
     );
     Ok(())
 }
@@ -1519,7 +1519,7 @@ fn preview_assets_for_build<'a>(
     }
     let build = manifest.builds.get(build_id).ok_or_else(|| {
         io::Error::other(format!(
-            "preview manifest no longer includes build {build_id}; run `herdr update` locally or set {REMOTE_BINARY_ENV_VAR}=target/release/herdr"
+            "preview manifest no longer includes build {build_id}; run `vimeflow update` locally or set {REMOTE_BINARY_ENV_VAR}=target/release/herdr"
         ))
     })?;
     Ok((build.protocol, &build.assets))

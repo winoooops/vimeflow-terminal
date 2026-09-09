@@ -112,8 +112,16 @@ fn init_logging() {
     crate::logging::init_file_logging("herdr.log");
 }
 
-const DEFAULT_CONFIG: &str = r##"# herdr configuration
-# Place this file at ~/.config/herdr/config.toml
+const DEFAULT_CONFIG: &str = r##"# vimeflow configuration
+# Place this file at ~/.config/vimeflow/config.toml
+#
+# vimeflow is a fork of herdr and keeps its own configuration directory, so an
+# installed herdr is unaffected by anything here. On first run vimeflow seeds
+# this directory from ~/.config/herdr if one exists, copying rather than moving.
+#
+# Every setting below is commented out and shows its default. Uncomment only
+# what you want to change; anything left commented keeps the built-in default,
+# which is also what you get with no config file at all.
 
 # Show first-run notification setup on startup.
 # Missing also shows onboarding; set false after you've chosen.
@@ -219,6 +227,20 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resize_mode = "prefix+r"
 # toggle_sidebar = "prefix+b"
 
+# Fork-only. Move keyboard focus into the agents sidebar. Two zones:
+#   cards   j/k move the cursor, l descends into traces,
+#           enter focuses that pane and leaves, h/esc leaves
+#   traces  j/k move the selection, o/enter opens the detail panel,
+#           h returns to cards, esc leaves
+#   panel   j/k scroll, esc closes and keeps your place
+# Moving the card cursor deliberately does not change pane focus; only enter
+# commits, so walking the list never throws the main view around. The mode bar
+# shows which zone you are in.
+# focus_agents = "prefix+a"
+
+# Fork-only. Toggle the island notification panel when records exist.
+# island_panel_toggle = "prefix+i"
+
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.
 # navigate_workspace_up = "up"
@@ -260,6 +282,22 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Maximum sidebar width when expanded (columns)
 # sidebar_max_width = 36
+#
+# Fork-only note: the agents sidebar draws herdr-agent-watcher's cards, whose
+# layout needs at least 34 columns, and vimeflow holds back 2 more so the
+# right-hand state glyph is not clipped. At the default maximum of 36 the cards
+# fit exactly; a narrower sidebar will start to clip them.
+
+# Fork-only. Agents sidebar renderer: "cards" draws the watcher's agent cards,
+# "legacy" the original text rows, "compact" the narrow status rail.
+# agents_view = "cards"
+
+# Fork-only. Hide idle agents, showing a "+N idle hidden" count instead.
+# agents_hide_idle = false
+
+# Fork-only. Sidebar ordering: "spaces" groups by workspace, "priority"
+# surfaces the agents that need attention first.
+# agent_panel_sort = "spaces"
 
 # Start with the sidebar collapsed. Changes take effect on the next launch.
 # sidebar_start_collapsed = false
@@ -409,7 +447,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Requires a Kitty graphics-compatible outer terminal.
 # kitty_graphics = false
 # Save recent pane screen history across full server restarts.
-pane_history = false
+# pane_history = false
 # While prefix mode is active, temporarily switch the host input source to
 # an ASCII-capable mode so prefix commands register even when an IME is
 # active, then restore the previous input source when prefix mode exits. On
@@ -436,6 +474,53 @@ pane_history = false
 # Maximum scrollback buffer size in bytes retained per pane terminal.
 # Matches Ghostty's default scrollback-limit behavior.
 # scrollback_limit_bytes = 10000000
+
+# ---------------------------------------------------------------------------
+# Fork-only settings
+#
+# Everything below exists in vimeflow and not in upstream herdr. Upstream will
+# warn about these keys if you copy this file back to a herdr install.
+# ---------------------------------------------------------------------------
+
+[agent_watcher]
+# Start the built-in agent watcher with the server. It is what fills the agent
+# cards with model, context, cache, cost and tool traces.
+#
+# Leave this on and keep the standalone herdr-agent-watcher *plugin* disabled.
+# The plugin launches its own daemon at server startup, which supersedes this
+# one; the embedded watcher then exits and does not restart, and every card
+# reads "no telemetry". Disable the plugin with:
+#   vimeflow plugin disable herdr-agent-watcher
+#
+# Startup-only: restart the server after changing this.
+# enabled = true
+
+[title_sync]
+# Derive pane labels automatically from agent state.
+# Startup-only: restart the server after changing this.
+# enabled = true
+
+# Polling interval in milliseconds for agents that do not emit lifecycle events.
+# interval_ms = 1000
+
+[ui.island]
+# The dynamic island in the tab bar: active pane titles, tab switching motion,
+# and notification records for background agents.
+
+# What happens when a background agent finishes or becomes blocked.
+# "toast" shows an arrival toast; "silent" records it without interrupting.
+# arrivals = "toast"
+
+# Glyph shown with the unread count once records exist. Must occupy one or two
+# display cells. The emoji default needs no Nerd Font; "!" restores ASCII.
+# bell = "🔔"
+
+[ui.sidebar]
+# Show pane numbers on the compact rail.
+# compact_rail_numbers = true
+
+# Leading glyph for compact rail rows: "inherit" follows the agent's mark.
+# compact_rail_leading = "inherit"
 "##;
 
 // Bundled at build time so the printed skill always matches this binary's release.
@@ -462,7 +547,7 @@ fn random_nested_message() -> &'static str {
 
 fn exit_if_nested_disabled(config: &config::Config) {
     if should_block_nested(config) {
-        eprintln!("\x1b[1merror:\x1b[0m nested herdr is disabled by default.");
+        eprintln!("\x1b[1merror:\x1b[0m nested vimeflow is disabled by default.");
         eprintln!("see configuration if you want to enable it.");
         eprintln!();
         eprintln!("\x1b[2m\"{}\"\x1b[0m", random_nested_message());
@@ -488,7 +573,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'vimeflow --help' for usage");
             std::process::exit(2);
         }
     };
@@ -496,7 +581,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'vimeflow --help' for usage");
             std::process::exit(2);
         }
     };
@@ -504,7 +589,7 @@ fn main() -> io::Result<()> {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'vimeflow --help' for usage");
             std::process::exit(2);
         }
     };
@@ -519,7 +604,7 @@ fn main() -> io::Result<()> {
         })
     {
         eprintln!("error: --remote can only be used with the default launch command");
-        eprintln!("run 'herdr --help' for usage");
+        eprintln!("run 'vimeflow --help' for usage");
         std::process::exit(2);
     }
 
@@ -554,6 +639,14 @@ fn main() -> io::Result<()> {
         return client::run_client();
     }
 
+    // Seed the fork's directories from an installed herdr, once, and only on
+    // the interactive launch. Every subcommand, the headless server and the
+    // thin client reach main() too, and copying a plugin tree on each of them
+    // would be both wasteful and surprising — an API call has no business
+    // rewriting the user's state directory. It is also the only path where a
+    // missing setup is something a person would actually notice.
+    config::migrate_from_upstream_once();
+
     if args.get(1).map(|s| s.as_str()) == Some("update") {
         let options = match update::parse_self_update_args(&args[2..]) {
             Ok(options) => options,
@@ -563,7 +656,7 @@ fn main() -> io::Result<()> {
             }
             Err(err) => {
                 eprintln!("{err}");
-                eprintln!("usage: herdr update [--handoff]");
+                eprintln!("usage: vimeflow update [--handoff]");
                 std::process::exit(2);
             }
         };
@@ -581,29 +674,29 @@ fn main() -> io::Result<()> {
     }
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("herdr — terminal workspace manager for AI coding agents");
+        println!("vimeflow — terminal workspace manager for AI coding agents (herdr fork)");
         println!();
-        println!("Usage: herdr [options]");
-        println!("       herdr --session <name> [options]");
-        println!("       herdr --remote <ssh-target> [--session <name>]");
-        println!("       herdr session attach <name>");
-        println!("       herdr completion zsh");
-        println!("       herdr update [--handoff]");
-        println!("       herdr channel set <stable|preview>");
-        println!("       herdr server stop");
-        println!("       herdr server reload-config");
-        println!("       herdr api <subcommand> ...");
-        println!("       herdr completion <shell>");
-        println!("       herdr config <subcommand> ...");
-        println!("       herdr channel <subcommand> ...");
-        println!("       herdr workspace <subcommand> ...");
-        println!("       herdr worktree <subcommand> ...");
-        println!("       herdr tab <subcommand> ...");
-        println!("       herdr notification <subcommand> ...");
-        println!("       herdr agent <subcommand> ...");
-        println!("       herdr pane <subcommand> ...");
-        println!("       herdr session <subcommand> ...");
-        println!("       herdr integration <subcommand> ...");
+        println!("Usage: vimeflow [options]");
+        println!("       vimeflow --session <name> [options]");
+        println!("       vimeflow --remote <ssh-target> [--session <name>]");
+        println!("       vimeflow session attach <name>");
+        println!("       vimeflow completion zsh");
+        println!("       vimeflow update [--handoff]");
+        println!("       vimeflow channel set <stable|preview>");
+        println!("       vimeflow server stop");
+        println!("       vimeflow server reload-config");
+        println!("       vimeflow api <subcommand> ...");
+        println!("       vimeflow completion <shell>");
+        println!("       vimeflow config <subcommand> ...");
+        println!("       vimeflow channel <subcommand> ...");
+        println!("       vimeflow workspace <subcommand> ...");
+        println!("       vimeflow worktree <subcommand> ...");
+        println!("       vimeflow tab <subcommand> ...");
+        println!("       vimeflow notification <subcommand> ...");
+        println!("       vimeflow agent <subcommand> ...");
+        println!("       vimeflow pane <subcommand> ...");
+        println!("       vimeflow session <subcommand> ...");
+        println!("       vimeflow integration <subcommand> ...");
         println!();
         println!("Common commands:");
         for (command, description) in [
@@ -672,7 +765,7 @@ fn main() -> io::Result<()> {
         }
         println!();
         println!("Advanced commands:");
-        println!("  {:<32} Run as headless server", "herdr server");
+        println!("  {:<32} Run as headless server", "vimeflow server");
         println!();
         println!("Options:");
         println!("  --no-session        Run monolithically (no server/client, escape hatch)");
@@ -690,12 +783,12 @@ fn main() -> io::Result<()> {
         println!("Logs:   {}", logging::help_log_paths_summary());
         println!("Env:    HERDR_CONFIG_PATH overrides config file path");
         println!("Home:   https://herdr.dev");
-        println!("Skill:  herdr --skill prints agent instructions for driving herdr from a pane");
+        println!("Skill:  vimeflow --skill prints agent instructions for driving it from a pane");
         return Ok(());
     }
 
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("herdr {}", crate::build_info::version());
+        println!("vimeflow {}", crate::build_info::version());
         return Ok(());
     }
 
@@ -726,7 +819,7 @@ fn main() -> io::Result<()> {
         let arg_name = arg.split_once('=').map(|(name, _)| name).unwrap_or(arg);
         if arg.starts_with('-') && !known_flags.contains(&arg_name) {
             eprintln!("unknown option: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'vimeflow --help' for usage");
             std::process::exit(2);
         }
         if !arg.starts_with('-')
@@ -747,7 +840,7 @@ fn main() -> io::Result<()> {
             .contains(&arg.as_str())
         {
             eprintln!("unknown command: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'vimeflow --help' for usage");
             std::process::exit(2);
         }
     }
@@ -771,7 +864,7 @@ fn main() -> io::Result<()> {
     // Check if a server is running, spawn one if needed, then attach as client.
     if !no_session {
         if let Err(err) = server::autodetect::auto_detect_launch() {
-            eprintln!("herdr: {err}");
+            eprintln!("vimeflow: {err}");
             std::process::exit(1);
         }
         return Ok(());
@@ -787,7 +880,7 @@ fn main() -> io::Result<()> {
     let _api_server = match api::start_server_with_capabilities(api_tx, event_hub.clone(), None) {
         Ok(server) => server,
         Err(err) if err.kind() == io::ErrorKind::AddrInUse => {
-            eprintln!("error: herdr is already running");
+            eprintln!("error: vimeflow is already running");
             eprintln!("socket: {}", api::socket_path().display());
             std::process::exit(1);
         }
@@ -898,6 +991,63 @@ fn main() -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// `--default-config` is documentation users are told to redirect into a
+    /// file, so it has to be valid TOML — a duplicated table header would only
+    /// surface the first time someone actually saved it.
+    #[test]
+    fn default_config_is_valid_toml_and_fully_commented() {
+        let parsed: toml::Value = toml::from_str(DEFAULT_CONFIG)
+            .unwrap_or_else(|err| panic!("--default-config does not parse: {err}"));
+
+        // Every table must be empty: the template documents defaults, so an
+        // active key would silently override one the moment it is saved.
+        fn assert_no_values(value: &toml::Value, path: &str) {
+            match value {
+                toml::Value::Table(table) => {
+                    for (key, nested) in table {
+                        let child = if path.is_empty() {
+                            key.clone()
+                        } else {
+                            format!("{path}.{key}")
+                        };
+                        assert!(
+                            nested.is_table(),
+                            "{child} is set in the default config; it should be commented out"
+                        );
+                        assert_no_values(nested, &child);
+                    }
+                }
+                _ => unreachable!("only tables are reachable from the root"),
+            }
+        }
+        assert_no_values(&parsed, "");
+    }
+
+    /// The fork's own settings are useless if a user cannot discover them.
+    #[test]
+    fn default_config_documents_every_fork_setting() {
+        for key in [
+            "[agent_watcher]",
+            "[title_sync]",
+            "[ui.island]",
+            "[ui.sidebar]",
+            "# focus_agents = ",
+            "# island_panel_toggle = ",
+            "# agents_view = ",
+            "# agents_hide_idle = ",
+            "# agent_panel_sort = ",
+            "# arrivals = ",
+            "# bell = ",
+            "# interval_ms = ",
+            "# compact_rail_numbers = ",
+        ] {
+            assert!(
+                DEFAULT_CONFIG.contains(key),
+                "default config never mentions {key}"
+            );
+        }
+    }
     use super::*;
 
     #[test]

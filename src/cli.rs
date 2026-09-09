@@ -195,7 +195,7 @@ fn channel_set(args: &[String]) -> std::io::Result<i32> {
 
     if let Err(err) = crate::update::self_update(crate::update::SelfUpdateOptions::default()) {
         eprintln!("update failed: {err}");
-        eprintln!("Run `herdr update` to retry.");
+        eprintln!("Run `vimeflow update` to retry.");
         return Ok(1);
     }
 
@@ -363,7 +363,9 @@ fn config_reset_keys(args: &[String]) -> std::io::Result<i32> {
         path.display()
     );
     println!("Built-in v2 keybindings will apply after Herdr restarts or reloads config.");
-    println!("If a Herdr server is running, run `herdr server reload-config` to apply this now.");
+    println!(
+        "If a Herdr server is running, run `vimeflow server reload-config` to apply this now."
+    );
     println!(
         "To restore: cp {} {}",
         backup_path.display(),
