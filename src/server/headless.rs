@@ -4795,6 +4795,8 @@ fn is_keybinding_config_diagnostic(diagnostic: &str) -> bool {
 pub fn run_server() -> io::Result<()> {
     init_logging();
     crate::platform::raise_server_nofile_limit();
+    #[cfg(unix)]
+    announce_api_socket_to_embedded_watcher();
 
     let args: Vec<String> = std::env::args().collect();
     if args.get(2).map(String::as_str) == Some("--handoff-import") {
@@ -5015,6 +5017,27 @@ fn run_handoff_import_server(_socket_path: &Path, _token: &str) -> io::Result<()
     Err(io::Error::other("live handoff is only supported on Unix"))
 }
 
+/// Tells the embedded watcher which API socket is ours.
+///
+/// `HerdrClient::from_env()` falls back to a hardcoded `~/.config/herdr/
+/// herdr.sock` when `HERDR_SOCKET_PATH` is unset. Upstream never notices —
+/// that path *is* upstream's. The fork moved its directory, so an unset
+/// variable silently points the watcher at an installed herdr instead: it
+/// binds that server's panes and never sees ours, and every card comes up
+/// with no telemetry while the watcher itself looks perfectly healthy.
+///
+/// Set only when absent, so an explicit override still wins, and set before
+/// the watcher thread exists so nothing reads it mid-write. The value matches
+/// what the server exports into its own panes, so this only makes explicit
+/// what was already true of this process.
+#[cfg(unix)]
+fn announce_api_socket_to_embedded_watcher() {
+    if std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR).is_some() {
+        return;
+    }
+    std::env::set_var(crate::api::SOCKET_PATH_ENV_VAR, crate::api::socket_path());
+}
+
 fn print_ready_message(api_socket: &Path, client_socket: &Path) {
     eprintln!("herdr server running; you can use any herdr CLI command in another terminal.");
     eprintln!("api socket: {}", api_socket.display());
@@ -5041,6 +5064,51 @@ fn init_logging() {
 
 #[cfg(test)]
 mod tests {
+
+    /// The watcher's socket fallback is `~/.config/herdr/herdr.sock`, which is
+    /// the wrong server for a fork that renamed its directory — and wrong
+    /// silently: the watcher binds the other server's panes and reports no
+    /// telemetry for ours while looking healthy.
+    #[cfg(unix)]
+    #[test]
+    fn embedded_watcher_is_told_our_api_socket() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let previous = std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR);
+        std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
+
+        announce_api_socket_to_embedded_watcher();
+
+        let announced = std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR)
+            .map(std::path::PathBuf::from)
+            .expect("an unset socket must be filled in, or the watcher guesses herdr's");
+        assert_eq!(announced, crate::api::socket_path());
+        assert!(
+            !announced.starts_with(dirs_next_home().join(".config").join("herdr")),
+            "announced our own socket, not an installed herdr's: {}",
+            announced.display()
+        );
+
+        // An explicit override is someone pointing the server somewhere on
+        // purpose; it must survive.
+        std::env::set_var(crate::api::SOCKET_PATH_ENV_VAR, "/tmp/explicit.sock");
+        announce_api_socket_to_embedded_watcher();
+        assert_eq!(
+            std::env::var(crate::api::SOCKET_PATH_ENV_VAR).unwrap(),
+            "/tmp/explicit.sock"
+        );
+
+        match previous {
+            Some(value) => std::env::set_var(crate::api::SOCKET_PATH_ENV_VAR, value),
+            None => std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR),
+        }
+    }
+
+    #[cfg(unix)]
+    fn dirs_next_home() -> std::path::PathBuf {
+        std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("/nonexistent"))
+    }
     use super::*;
 
     use crate::app::AppState;
