@@ -116,8 +116,8 @@ const DEFAULT_CONFIG: &str = r##"# vimeflow configuration
 # Place this file at ~/.config/vimeflow/config.toml
 #
 # vimeflow is a fork of herdr and keeps its own configuration directory, so an
-# installed herdr is unaffected by anything here. On first run vimeflow seeds
-# this directory from ~/.config/herdr if one exists, copying rather than moving.
+# installed herdr is unaffected by anything here. Nothing is inherited from it
+# either: vimeflow starts from a clean config.
 #
 # Every setting below is commented out and shows its default. Uncomment only
 # what you want to change; anything left commented keeps the built-in default,
@@ -638,14 +638,6 @@ fn main() -> io::Result<()> {
         exit_if_nested_disabled(&loaded_config.config);
         return client::run_client();
     }
-
-    // Seed the fork's directories from an installed herdr, once, and only on
-    // the interactive launch. Every subcommand, the headless server and the
-    // thin client reach main() too, and copying a plugin tree on each of them
-    // would be both wasteful and surprising — an API call has no business
-    // rewriting the user's state directory. It is also the only path where a
-    // missing setup is something a person would actually notice.
-    config::migrate_from_upstream_once();
 
     if args.get(1).map(|s| s.as_str()) == Some("update") {
         let options = match update::parse_self_update_args(&args[2..]) {

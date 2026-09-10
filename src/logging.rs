@@ -20,14 +20,14 @@ pub(crate) fn init_file_logging(file_name: &str) {
         return;
     };
 
-    // The directive must name the crate root, and for a binary target that is
-    // the *bin* name — so renaming the executable to `vimeflow` moved every
-    // tracing target from `herdr::…` to `vimeflow::…`. A stale `herdr=info`
-    // here matches nothing and silently disables all file logging, which is
-    // exactly the kind of failure that only surfaces when someone goes looking
-    // for a log that was never written.
-    let filter =
-        EnvFilter::try_from_env("HERDR_LOG").unwrap_or_else(|_| EnvFilter::new("vimeflow=info"));
+    // Both crates have to be named. A directive matches by string prefix, so
+    // upstream's single `herdr=info` happened to cover `herdr_agent_watcher`
+    // too. Renaming the binary moved our own targets to `vimeflow::…` and, less
+    // obviously, dropped the watcher's — leaving the embedded watcher running
+    // with nothing to show for it in the log, which is the one place you look
+    // when its cards come up empty.
+    let filter = EnvFilter::try_from_env("HERDR_LOG")
+        .unwrap_or_else(|_| EnvFilter::new("vimeflow=info,herdr_agent_watcher=info"));
 
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)

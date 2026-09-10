@@ -22,22 +22,17 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "worktrees",
 ];
 
+/// The fork's own directory, deliberately distinct from upstream herdr's.
+///
+/// Nothing is inherited from an installed herdr: vimeflow starts from a clean
+/// config. The two can run at the same time because a server exports its *own*
+/// socket path to the panes it spawns, so each side's children resolve back to
+/// the side that started them.
 pub fn app_dir_name() -> &'static str {
     if cfg!(debug_assertions) {
         "vimeflow-dev"
     } else {
         "vimeflow"
-    }
-}
-
-/// The directory upstream herdr would use. The fork reads it once, to seed its
-/// own on first run, and never writes to it — an installed herdr keeps working
-/// off the original.
-pub fn upstream_app_dir_name() -> &'static str {
-    if cfg!(debug_assertions) {
-        "herdr-dev"
-    } else {
-        "herdr"
     }
 }
 
@@ -53,71 +48,6 @@ pub fn state_dir() -> PathBuf {
         return PathBuf::from(dir).join(app_dir_name());
     }
     platform_state_dir()
-}
-
-/// Seeds the fork's config and state from an installed herdr's, once.
-///
-/// The rename would otherwise strand an existing setup — config, sessions,
-/// plugin registry, the Claude bridge install — behind a directory the fork no
-/// longer looks at. Copying is one-way and one-time: the upstream directory is
-/// only read, so herdr keeps running off it, and the presence of the fork's own
-/// directory is what marks the migration done. After this the two are
-/// independent and neither sees the other's edits.
-pub fn migrate_from_upstream_once() {
-    for (ours, theirs) in [
-        (config_dir(), sibling_dir(&config_dir())),
-        (state_dir(), sibling_dir(&state_dir())),
-    ] {
-        if ours.exists() {
-            continue;
-        }
-        let Some(theirs) = theirs else { continue };
-        if !theirs.is_dir() {
-            continue;
-        }
-        match copy_dir_recursive(&theirs, &ours) {
-            Ok(()) => tracing::info!(
-                from = %theirs.display(),
-                to = %ours.display(),
-                "seeded vimeflow config from an existing herdr install"
-            ),
-            // A partial copy is worse than none: leaving the directory absent
-            // means the next run retries instead of starting from half a setup.
-            Err(err) => {
-                tracing::warn!(
-                    from = %theirs.display(),
-                    to = %ours.display(),
-                    error = %err,
-                    "could not seed vimeflow config from herdr; starting fresh"
-                );
-                let _ = std::fs::remove_dir_all(&ours);
-            }
-        }
-    }
-}
-
-/// The same path with the fork's directory component swapped for upstream's.
-fn sibling_dir(ours: &std::path::Path) -> Option<PathBuf> {
-    let name = ours.file_name()?.to_str()?;
-    (name == app_dir_name()).then(|| ours.with_file_name(upstream_app_dir_name()))
-}
-
-fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let target = to.join(entry.file_name());
-        let kind = entry.file_type()?;
-        if kind.is_dir() {
-            copy_dir_recursive(&entry.path(), &target)?;
-        } else if kind.is_file() {
-            std::fs::copy(entry.path(), &target)?;
-        }
-        // Sockets and symlinks are deliberately skipped: a socket belongs to
-        // the process that bound it, and copying one would hand the fork a
-        // dead path that looks live.
-    }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -1388,93 +1318,5 @@ mouse_capture = false
         let (updated, removed) = remove_keybinding_config_sections(content);
         assert!(!removed);
         assert_eq!(updated, content);
-    }
-
-    /// Isolates both directory roots so the migration never touches a real one.
-    fn with_temp_roots(name: &str, body: impl FnOnce(&std::path::Path)) {
-        let _guard = crate::config::test_config_env_lock().lock().unwrap();
-        let root = std::env::temp_dir().join(format!(
-            "vimeflow-migrate-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let previous = (
-            std::env::var("XDG_CONFIG_HOME").ok(),
-            std::env::var("XDG_STATE_HOME").ok(),
-        );
-        std::env::set_var("XDG_CONFIG_HOME", &root);
-        std::env::set_var("XDG_STATE_HOME", &root);
-
-        body(&root);
-
-        match previous.0 {
-            Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
-        match previous.1 {
-            Some(value) => std::env::set_var("XDG_STATE_HOME", value),
-            None => std::env::remove_var("XDG_STATE_HOME"),
-        }
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn migration_seeds_from_herdr_without_touching_it() {
-        with_temp_roots("seed", |root| {
-            let theirs = root.join(upstream_app_dir_name());
-            std::fs::create_dir_all(theirs.join("sessions/m1test")).unwrap();
-            std::fs::write(theirs.join("config.toml"), "onboarding = false\n").unwrap();
-            std::fs::write(theirs.join("sessions/m1test/session.json"), "{}").unwrap();
-
-            migrate_from_upstream_once();
-
-            let ours = root.join(app_dir_name());
-            assert_eq!(
-                std::fs::read_to_string(ours.join("config.toml")).unwrap(),
-                "onboarding = false\n"
-            );
-            assert!(
-                ours.join("sessions/m1test/session.json").exists(),
-                "nested state should come across"
-            );
-            // Upstream must keep working off its own directory.
-            assert!(theirs.join("config.toml").exists());
-        });
-    }
-
-    #[test]
-    fn migration_never_overwrites_an_existing_fork_config() {
-        with_temp_roots("existing", |root| {
-            let theirs = root.join(upstream_app_dir_name());
-            std::fs::create_dir_all(&theirs).unwrap();
-            std::fs::write(theirs.join("config.toml"), "from = \"herdr\"\n").unwrap();
-
-            let ours = root.join(app_dir_name());
-            std::fs::create_dir_all(&ours).unwrap();
-            std::fs::write(ours.join("config.toml"), "from = \"vimeflow\"\n").unwrap();
-
-            // Running twice must be indistinguishable from running once.
-            migrate_from_upstream_once();
-            migrate_from_upstream_once();
-
-            assert_eq!(
-                std::fs::read_to_string(ours.join("config.toml")).unwrap(),
-                "from = \"vimeflow\"\n",
-                "an existing fork config is what marks the migration done"
-            );
-        });
-    }
-
-    #[test]
-    fn migration_is_inert_without_an_upstream_install() {
-        with_temp_roots("absent", |root| {
-            migrate_from_upstream_once();
-            assert!(
-                !root.join(app_dir_name()).exists(),
-                "nothing to seed from should leave no directory behind"
-            );
-        });
     }
 }

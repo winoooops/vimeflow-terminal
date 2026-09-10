@@ -48,8 +48,6 @@ pub(crate) fn app_dir_name() -> &'static str {
     io::app_dir_name()
 }
 
-pub(crate) use io::migrate_from_upstream_once;
-
 #[cfg(test)]
 pub(crate) fn test_config_env_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();

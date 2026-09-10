@@ -149,14 +149,29 @@ vimeflow keeps its own directories, so an installed herdr is untouched:
 | config | `~/.config/vimeflow/` | `~/.config/herdr/` |
 | state | `~/.local/state/vimeflow/` | `~/.local/state/herdr/` |
 
-On its **first interactive launch**, if `~/.config/vimeflow` does not exist and
-`~/.config/herdr` does, vimeflow copies it across — config, sessions, plugin
-registry, Claude bridge install — and leaves the original alone. The two are
-independent from then on; neither sees the other's later edits.
+vimeflow starts from a **clean config**; nothing is inherited from an installed
+herdr. Copy `~/.config/herdr/config.toml` across by hand if you want your
+settings.
 
-`HERDR_*` environment variables and the `herdr.sock` socket filenames are
-shared on purpose, so plugins keep working. This means the two must not run
-against the same session directory at once.
+The two can run **at the same time**: a server exports its own socket path into
+the panes it spawns, so each side's children resolve back to the side that
+started them. `HERDR_*` variable names and the `herdr.sock` filenames are shared
+on purpose so plugins keep working, which has one consequence — launching
+vimeflow *from inside a herdr pane* inherits that pane's `HERDR_SOCKET_PATH` and
+attaches to herdr. Start it from a terminal outside any session, or clear the
+variables:
+
+```bash
+env -u HERDR_ENV -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH vimeflow
+```
+
+Check which one you are on with `vimeflow status server` — the socket path names
+the side that owns it.
+
+One thing genuinely cannot be shared: the **Claude metrics bridge** is a single
+hook in the global `~/.claude/settings.json`, so only one install can own it.
+Whichever ran `watcher claude-bridge enable` last gets Claude's context, cache
+and cost numbers; the other shows `—` for them.
 
 ### configuration
 
