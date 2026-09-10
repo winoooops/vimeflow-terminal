@@ -902,9 +902,10 @@
         {
           "key": "ui.toast.herdr.position",
           "type": "enum",
-          "default": "\"bottom-right\"",
-          "description": "In-app toast position, relative to the full Herdr frame.",
+          "default": "\"island\"",
+          "description": "Desktop in-app toast position. island centers on the capsule and opens toward the panes, or uses top-center when no capsule is laid out. Corner positions are relative to the full Herdr frame. Mobile keeps its bottom banner.",
           "values": [
+            "island",
             "top-left",
             "top-right",
             "bottom-left",

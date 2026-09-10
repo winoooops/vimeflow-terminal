@@ -383,10 +383,12 @@ delivery = "herdr"
 delay_seconds = 1
 
 [ui.toast.herdr]
-position = "bottom-right"
+position = "island"
 ```
 
 Choose `herdr` for an in-app toast, `terminal` for an outer-terminal notification that works well over SSH, `system` for the local OS notification service, or `off` to disable popups. Herdr suppresses popups for the active tab. Search `ui.toast` in the [Config reference](/docs/config-reference/) for positions, delay behavior, and clipboard feedback settings.
+
+Desktop in-app toasts default to `ui.toast.herdr.position = "island"`: centered on the capsule, below a top tab bar or above a bottom tab bar, with a plain top-center fallback in classic mode or when no capsule is laid out; `"bottom-right"` restores the corner placement, while mobile keeps its bottom banner and clipboard feedback retains its own position setting.
 
 ## Sound
 

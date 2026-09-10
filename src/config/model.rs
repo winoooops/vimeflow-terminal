@@ -73,10 +73,11 @@ pub enum ToastDelivery {
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum ToastHerdrPosition {
+    #[default]
+    Island,
     TopLeft,
     TopRight,
     BottomLeft,
-    #[default]
     BottomRight,
 }
 
@@ -188,7 +189,7 @@ pub struct ToastConfig {
     pub clipboard: ClipboardToastConfig,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct HerdrToastConfig {
     pub position: ToastHerdrPosition,
@@ -1193,14 +1194,6 @@ impl Default for ToastConfig {
     }
 }
 
-impl Default for HerdrToastConfig {
-    fn default() -> Self {
-        Self {
-            position: ToastHerdrPosition::BottomRight,
-        }
-    }
-}
-
 impl Default for ClipboardToastConfig {
     fn default() -> Self {
         Self {
@@ -1878,19 +1871,40 @@ position = "top-center"
     }
 
     #[test]
-    fn toast_config_defaults_preserve_existing_behavior_with_delay() {
+    fn toast_config_defaults_to_island_with_existing_delivery_and_delay() {
         let config = Config::default();
         assert_eq!(config.ui.toast.delivery, ToastDelivery::Off);
         assert_eq!(config.ui.toast.delay_seconds, 1);
-        assert_eq!(
-            config.ui.toast.herdr.position,
-            ToastHerdrPosition::BottomRight
-        );
+        assert_eq!(config.ui.toast.herdr.position, ToastHerdrPosition::Island);
         assert!(config.ui.toast.clipboard.enabled);
         assert_eq!(
             config.ui.toast.clipboard.position,
             ToastClipboardPosition::BottomCenter
         );
+    }
+
+    #[test]
+    fn toast_config_absent_position_defaults_to_island() {
+        for source in ["", "[ui.toast]", "[ui.toast.herdr]"] {
+            let config: Config = toml::from_str(source).unwrap();
+            assert_eq!(config.ui.toast.herdr.position, ToastHerdrPosition::Island);
+        }
+    }
+
+    #[test]
+    fn toast_config_parses_island_and_bottom_right_escape_hatch() {
+        for (value, expected) in [
+            ("island", ToastHerdrPosition::Island),
+            ("bottom-right", ToastHerdrPosition::BottomRight),
+        ] {
+            let config: Config =
+                toml::from_str(&format!("[ui.toast.herdr]\nposition = \"{value}\"")).unwrap();
+            assert_eq!(config.ui.toast.herdr.position, expected);
+            assert_eq!(
+                serde_json::to_string(&expected).unwrap(),
+                format!("\"{value}\"")
+            );
+        }
     }
 
     #[test]

@@ -4093,6 +4093,7 @@
         },
         "ToastHerdrPosition": {
           "enum": [
+            "island",
             "top-left",
             "top-right",
             "bottom-left",
