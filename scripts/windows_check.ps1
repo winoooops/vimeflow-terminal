@@ -1,3 +1,4 @@
+# Modified from herdr by the vimeflow project — see FORK.md
 param(
     [ValidateSet("lint", "check")]
     [string]$Mode = "check"
@@ -42,7 +43,7 @@ function Invoke-CargoTestFilter {
         "--target",
         "x86_64-pc-windows-msvc",
         "--bin",
-        "herdr",
+        "vimeflow",
         $Filter
     )
     $harnessArguments = @("--list")
@@ -81,7 +82,7 @@ Invoke-Checked cargo @("fmt", "--check")
 Invoke-CargoWithZigCacheRecovery @(
     "clippy",
     "--bin",
-    "herdr",
+    "vimeflow",
     "--locked",
     "--target",
     "x86_64-pc-windows-msvc",

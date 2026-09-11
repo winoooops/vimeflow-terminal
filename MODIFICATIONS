@@ -23,9 +23,11 @@ Modified upstream files
 - docs/next/website/src/content/docs/configuration.mdx
 - docs/next/website/src/data/config-reference.json
 - justfile
+- scripts/windows_check.ps1
 - nix/package.nix
 - src/update.rs
 - src/cli.rs
+- src/cli/server_not_running.rs
 - src/cli/spec.rs
 - src/product_announcements.rs
 - src/app/mod.rs

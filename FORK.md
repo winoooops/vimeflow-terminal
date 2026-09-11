@@ -179,6 +179,8 @@ the top of the file:
 | `src/app/input/modal.rs` | Snap the island animation when a TUI rename changes rendered title geometry and handle island-panel menu keys. | island motion (this commit), island active title (this commit), island notification panel (this commit) |
 | `.github/workflows/ci.yml` | Point the Windows ConPTY smoke and packaging steps at the renamed build output. The bundle's internal `herdr.exe` name is upstream's and left alone. | vimeflow rename (this commit) |
 | `.github/workflows/preview.yml` | Same, for the preview packaging step. | vimeflow rename (this commit) |
+| `scripts/windows_check.ps1` | Lint and test the renamed bin target. | vimeflow rename (this commit) |
+| `src/cli/server_not_running.rs` | Name the renamed executable in the socket-override branch of the start hint. | vimeflow rename (this commit) |
 | `src/ui/menus.rs` | Render the agent-card trace mode bar and the watcher-backed trace detail panel. | agent card trace navigation (this commit) |
 | `src/app/input/terminal.rs` | Initialize island record activation metadata on terminal-input toast fixtures and intercept island-panel keys before pane forwarding. | island notification arrivals (this commit), island notification panel (this commit), island notification review fixes (this commit) |
 | `src/app/api/layouts.rs` | Clear island animation before applying API-driven layout replacements. | island motion (this commit) |

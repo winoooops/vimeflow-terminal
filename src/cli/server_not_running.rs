@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use std::fmt;
 use std::path::Path;
 
@@ -48,7 +49,7 @@ fn startup_command(socket_path: &Path) -> String {
         // A socket override wins over an inherited HERDR_SESSION. Keep the
         // command in the current environment so it starts the overridden
         // target instead of directing the user to an unrelated session.
-        "herdr".to_string()
+        "vimeflow".to_string()
     }
 }
 
