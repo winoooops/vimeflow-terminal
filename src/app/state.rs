@@ -818,6 +818,12 @@ pub enum Mode {
     /// Keyboard navigation of the agents sidebar: a card zone and a trace
     /// zone. Captures keys the way `Copy` does, because bare j/k/o would
     /// otherwise reach the pane's agent.
+    ///
+    /// Only ever constructed on Unix — the agents sidebar is built on the
+    /// agent watcher, which is a Unix-only dependency. The variant itself
+    /// stays unconditional so every shared `match` over `Mode` keeps
+    /// compiling on Windows without a parallel set of cfg'd arms.
+    #[cfg_attr(not(unix), allow(dead_code))]
     Agents,
     ConfirmClose,
     ContextMenu,
@@ -1657,6 +1663,10 @@ pub struct AppState {
     /// card that expands instead of the focused pane's. Deliberately does not
     /// move pane focus: walking the list would otherwise switch workspace and
     /// tab on every keystroke and throw the main view around.
+    ///
+    /// Read only on Unix, where the agent cards exist. Kept unconditional so
+    /// `AppState`'s shape does not diverge by platform.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub agent_card_cursor: Option<PaneId>,
     /// Selected trace row as `(anchor pane, toolUseId)`. The id is the ring's
     /// own stable key; a row index would silently retarget as calls push in.

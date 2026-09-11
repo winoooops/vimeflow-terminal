@@ -5026,13 +5026,24 @@ fn run_handoff_import_server(_socket_path: &Path, _token: &str) -> io::Result<()
 /// binds that server's panes and never sees ours, and every card comes up
 /// with no telemetry while the watcher itself looks perfectly healthy.
 ///
-/// Set only when absent, so an explicit override still wins, and set before
-/// the watcher thread exists so nothing reads it mid-write. The value matches
-/// what the server exports into its own panes, so this only makes explicit
-/// what was already true of this process.
+/// Set before the watcher thread exists, so nothing reads it mid-write, and
+/// only when doing so cannot change how this server resolves its own sockets:
+///
+/// - `HERDR_SOCKET_PATH` already set — an explicit override must win.
+/// - `HERDR_CLIENT_SOCKET_PATH` set — `client_socket_path` derives the client
+///   socket from the API override *in preference to* that variable, so setting
+///   one here would quietly discard the other. That override is documented as
+///   a legacy/testing fallback; a session using it keeps the watcher's old
+///   guess, which is the narrower bug of the two.
+///
+/// With both unset, the derived client socket is byte-identical to the session
+/// default that would otherwise be used, so this is a no-op for herdr and only
+/// tells the watcher where to look.
 #[cfg(unix)]
 fn announce_api_socket_to_embedded_watcher() {
-    if std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR).is_some() {
+    if std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR).is_some()
+        || std::env::var_os(crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR).is_some()
+    {
         return;
     }
     std::env::set_var(crate::api::SOCKET_PATH_ENV_VAR, crate::api::socket_path());
@@ -5096,6 +5107,22 @@ mod tests {
             std::env::var(crate::api::SOCKET_PATH_ENV_VAR).unwrap(),
             "/tmp/explicit.sock"
         );
+
+        // A client-socket override must not be silently discarded:
+        // `client_socket_path` derives the client socket from an API override
+        // in preference to that variable, so announcing one would change which
+        // socket this server binds.
+        std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
+        std::env::set_var(
+            crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR,
+            "/tmp/custom-client.sock",
+        );
+        announce_api_socket_to_embedded_watcher();
+        assert!(
+            std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR).is_none(),
+            "announcing here would override the caller's client socket"
+        );
+        std::env::remove_var(crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR);
 
         match previous {
             Some(value) => std::env::set_var(crate::api::SOCKET_PATH_ENV_VAR, value),
