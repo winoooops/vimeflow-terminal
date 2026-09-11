@@ -9,6 +9,7 @@ Modified upstream files
 -----------------------
 
 - .gitignore
+- .github/workflows/ci.yml
 - .github/workflows/issue-gate.yml
 - .github/workflows/label-next-release-issues.yml
 - .github/workflows/nix.yml
