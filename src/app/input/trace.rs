@@ -359,6 +359,9 @@ impl AppState {
             self.exit_agents_mode();
             return;
         }
+        // Live calls and resized panels can leave a valid selection's card
+        // too tall to fit below the retained scroll position.
+        self.anchor_card_to_top(pane);
         let ids = self.trace_selectable_ids(pane);
         if ids.contains(&id) {
             return;
@@ -566,6 +569,69 @@ mod tests {
         assert!(state.agent_card_cursor.is_some());
         assert!(state.agent_trace_focus.is_none());
         assert!(state.agent_trace_panel.is_none());
+    }
+
+    #[test]
+    fn selected_tail_card_stays_visible_after_trace_growth_and_resize() {
+        let mut state = state_with_agent();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("tail"));
+        state.ensure_test_terminals();
+        for terminal in state.terminals.values_mut() {
+            terminal.detected_agent = Some(crate::detect::Agent::Claude);
+            terminal.state = crate::detect::AgentState::Working;
+        }
+        let workspace = &state.workspaces[1];
+        let pane = workspace.tabs[0].root_pane;
+        let public_id = crate::workspace::public_pane_id_for_number(
+            &workspace.id,
+            workspace.public_pane_number(pane).unwrap(),
+        );
+        state
+            .agent_telemetry
+            .insert(public_id.clone(), PaneTelemetry::with_agent("claude"));
+        state.enter_agents_mode();
+        state.move_card_cursor(1);
+        state.select_trace(pane, "id0");
+
+        for (calls, height) in [(2, 24), (4, 24), (4, 40), (4, 24)] {
+            state
+                .agent_telemetry
+                .get_mut(&public_id)
+                .unwrap()
+                .tool_calls = (0..calls)
+                .map(|i| {
+                    serde_json::json!({
+                        "toolUseId": format!("id{i}"), "tool": "Edit",
+                        "args": "x", "status": "done"
+                    })
+                })
+                .collect();
+            crate::ui::compute_view(&mut state, Rect::new(0, 0, 100, height));
+            let body = crate::ui::agent_panel_items_rect(&state, state.agent_panel_rect(), false);
+            if height == 24 {
+                assert_eq!(body.height, 9);
+                let entries = crate::ui::agent_panel_entries(&state);
+                assert_eq!(
+                    crate::ui::agent_entry_height_in_body(
+                        &state,
+                        &entries[1],
+                        body.width,
+                        body.height
+                    ),
+                    3 + calls
+                );
+                assert_eq!(state.agent_panel_scroll, usize::from(calls > 2));
+            }
+            assert_eq!(state.agent_trace_focus, Some((pane, "id0".into())));
+            assert!(
+                (body.y..body.y + body.height).any(|row| {
+                    state.trace_target_at(body.x, row) == Some((pane, "id0".into()))
+                }),
+                "selected trace should remain visible with {calls} calls at height {height}"
+            );
+        }
     }
 
     #[tokio::test]

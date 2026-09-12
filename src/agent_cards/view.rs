@@ -6,6 +6,8 @@
 //! What stays is the part the watcher cannot know — which pane a card is for,
 //! the workspace it lives in, and how herdr's palette paints the result.
 
+use std::borrow::Cow;
+
 use herdr_agent_watcher::daemon::store::{CardState, PaneTelemetry};
 use herdr_agent_watcher::sidebar::config::{AgentMark, ToolCallStyle};
 use herdr_agent_watcher::sidebar::layout::{self, LineSpan};
@@ -71,21 +73,28 @@ pub(crate) fn build_card(
     // pane still gets a card and still reads working/blocked rather than
     // defaulting to idle. Where the watcher *has* bound a pane its lifecycle
     // events are the better source, so its `card_state` is left alone — and
-    // the real telemetry is borrowed, never cloned, because this runs for
-    // every card on every frame.
-    let stand_in;
-    let telemetry = match input.telemetry {
-        Some(telemetry) => telemetry,
+    // telemetry with a title stays borrowed because this runs for every card
+    // on every frame.
+    let mut telemetry = match input.telemetry {
+        Some(telemetry) => Cow::Borrowed(telemetry),
         None => {
             let mut telemetry = PaneTelemetry::with_agent(input.name);
             telemetry.card_state = card_state(input.state, input.seen);
-            if let Some(task) = input.task.filter(|task| !task.is_empty()) {
-                telemetry.title = Some(serde_json::json!({ "title": task }));
-            }
-            stand_in = telemetry;
-            &stand_in
+            Cow::Owned(telemetry)
         }
     };
+    if telemetry
+        .title
+        .as_ref()
+        .and_then(|title| title.get("title"))
+        .and_then(serde_json::Value::as_str)
+        .is_none()
+    {
+        if let Some(task) = input.task.filter(|task| !task.is_empty()) {
+            telemetry.to_mut().title = Some(serde_json::json!({ "title": task }));
+        }
+    }
+    let telemetry = telemetry.as_ref();
 
     // herdr's identity, injected through the hook the watcher provides for it:
     // the watcher's own task line is `cwd › task` and has no notion of a
@@ -383,7 +392,7 @@ mod tests {
         // The watcher's own task line is `cwd › task` with no workspace; the
         // cwd_label hook is what keeps 23 cards tellable apart.
         let telemetry = telemetry();
-        let rendered = plain(&card(Some(&telemetry), None, false, 3));
+        let rendered = plain(&card_at(Some(&telemetry), false, 80, 3));
 
         assert!(
             rendered
@@ -406,6 +415,25 @@ mod tests {
             rendered.iter().any(|line| line.contains('◐')),
             "detector state should reach the glyph, got {rendered:?}"
         );
+    }
+
+    #[test]
+    fn pane_title_survives_titleless_telemetry_and_yields_to_a_telemetry_title() {
+        let mut telemetry = telemetry();
+        telemetry.cwd = None;
+        for title in [None, Some(serde_json::json!({"title": null}))] {
+            telemetry.title = title.clone();
+            for expanded in [false, true] {
+                let rendered = plain(&card(Some(&telemetry), None, expanded, 40));
+                assert!(rendered.iter().any(|line| line.contains("ship cards")));
+            }
+            assert_eq!(telemetry.title, title);
+        }
+
+        telemetry.title = Some(serde_json::json!({"title": "watcher task"}));
+        let rendered = plain(&card(Some(&telemetry), None, false, 40));
+        assert!(rendered.iter().any(|line| line.contains("watcher task")));
+        assert!(!rendered.iter().any(|line| line.contains("ship cards")));
     }
 
     #[test]
