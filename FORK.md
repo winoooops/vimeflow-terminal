@@ -166,7 +166,7 @@ the top of the file:
 
 | Upstream path | Reason | Fork commit |
 | --- | --- | --- |
-| `src/remote/unix.rs` | Validate remote fork binaries against the Vimeflow version banner while retaining the protocol check. | PR #17 blocking fixes |
+| `src/remote/unix.rs` | Discover and install remote binaries under Vimeflow names, validating the staged fork version and protocol before replacement. | PR #17 blocking fixes |
 | `src/update.rs` | Prevent hosted Herdr manifest fetches, self-update installs, and background update checks in the fork. | `faf956e9b815045ca114d89b7faf9534386e0e8b` |
 | `src/cli.rs` | Reject fork-disabled update channels, dispatch the native watcher CLI, and share its coexistence diagnostics with server startup. | `dded4c73`, `b3aff323` |
 | `src/product_announcements.rs` | Ignore announcements delivered through stock Herdr update manifests while retaining local preview support and its intentionally dormant helpers. | `faf956e9b815045ca114d89b7faf9534386e0e8b`, P5 clippy gate (this commit) |
@@ -341,6 +341,9 @@ and a compatibility alias period if the environment protocol is ever renamed.
 `src/remote/unix.rs` also references Herdr-hosted manifests to provision a
 matching binary on a remote host. It does not update the local fork; M0b
 scoped neutralization to `src/update.rs`, channel machinery, and product
-announcements. PR #17 aligns remote version validation with the Vimeflow
-banner for copied or explicitly supplied fork binaries, retaining the protocol
-check. Hosted remote provisioning remains outside that fix.
+announcements. PR #17 uses Vimeflow discovery names and installs to
+`~/.local/bin/vimeflow`, leaving upstream binaries intact. Every provisioning
+source, including hosted assets, must report the matching Vimeflow banner and
+protocol on the remote host before it can replace the installed fork binary.
+Incompatible sources fail with a diagnostic directing users to
+`HERDR_REMOTE_BINARY`; no fork-hosted release system is provided.

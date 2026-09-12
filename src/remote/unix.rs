@@ -294,7 +294,7 @@ struct RemoteHerdr {
 
 impl RemoteHerdr {
     fn for_platform(platform: RemotePlatform) -> Self {
-        let install_suffix = ".local/bin/herdr".to_string();
+        let install_suffix = ".local/bin/vimeflow".to_string();
         let shell_path = format!("\"$HOME/{install_suffix}\"");
         Self {
             install_suffix,
@@ -551,6 +551,18 @@ impl RemoteSsh {
         copy_result?;
 
         if status.success() {
+            // Validate on the target platform before replacing the installed binary.
+            let output = self.sh_output(&remote_install_validation_script(&tmp_path))?;
+            if !output.status.success()
+                || !remote_binary_status_matches(&String::from_utf8_lossy(&output.stdout))
+            {
+                let _ = self.sh_output(&format!("rm -f {}", shell_quote(&tmp_path)));
+                return Err(io::Error::other(format!(
+                    "remote installation source is not compatible with vimeflow {} (protocol {CURRENT_PROTOCOL}); existing binaries were preserved; set {REMOTE_BINARY_ENV_VAR} to a matching Vimeflow binary built for {}",
+                    current_version(),
+                    remote_herdr.platform.asset_key()
+                )));
+            }
             let output = self.sh_output(&remote_install_commit_script(&tmp_path, &dest_path))?;
             if output.status.success() {
                 Ok(())
@@ -606,9 +618,16 @@ fn remote_install_stream_command(tmp_path: &str) -> String {
 
 fn remote_install_commit_script(tmp_path: &str, dest_path: &str) -> String {
     format!(
-        "set -eu\nchmod 755 {tmp_path}\nmv {tmp_path} {dest_path}\n",
+        "set -eu\nmv {tmp_path} {dest_path}\n",
         tmp_path = shell_quote(tmp_path),
         dest_path = shell_quote(dest_path)
+    )
+}
+
+fn remote_install_validation_script(tmp_path: &str) -> String {
+    format!(
+        "set -eu\nchmod 755 {path}\n{path} --version\n{path} status client --json\n",
+        path = shell_quote(tmp_path)
     )
 }
 
@@ -722,7 +741,7 @@ fn prepare_remote_herdr(
 
     if !remote_binary_matches(ssh, &remote_herdr)? {
         return Err(io::Error::other(format!(
-            "installed remote herdr at {}, but it did not report version {}",
+            "installed remote vimeflow at {}, but it did not report version {}",
             remote_herdr.shell_path,
             current_version()
         )));
@@ -804,34 +823,34 @@ emit() {
     fi
 }
 if [ -n "$home" ]; then
-    emit "$home/.local/bin/herdr"
+    emit "$home/.local/bin/vimeflow"
 fi
 "#,
     );
     if platform.os == "macos" {
         script.push_str(
-            r#"    emit "/opt/homebrew/bin/herdr"
-    emit "/usr/local/bin/herdr"
+            r#"    emit "/opt/homebrew/bin/vimeflow"
+    emit "/usr/local/bin/vimeflow"
 "#,
         );
     } else if platform.os == "linux" {
         script.push_str(
-            r#"    emit "/home/linuxbrew/.linuxbrew/bin/herdr"
+            r#"    emit "/home/linuxbrew/.linuxbrew/bin/vimeflow"
 "#,
         );
     }
     script.push_str(
         r#"if [ -n "$home" ]; then
-    emit "$home/.local/share/mise/installs/herdr/$version/bin/herdr"
-    emit "$home/.local/share/mise/installs/herdr/$version/herdr"
-    emit "$home/.local/share/mise/installs/github-ogulcancelik-herdr/$version/herdr"
-    emit "$home/.nix-profile/bin/herdr"
+    emit "$home/.local/share/mise/installs/vimeflow/$version/bin/vimeflow"
+    emit "$home/.local/share/mise/installs/vimeflow/$version/vimeflow"
+    emit "$home/.local/share/mise/installs/github-winoooops-vimeflow-terminal/$version/vimeflow"
+    emit "$home/.nix-profile/bin/vimeflow"
 fi
 if [ -n "$user" ]; then
-    emit "/etc/profiles/per-user/$user/bin/herdr"
+    emit "/etc/profiles/per-user/$user/bin/vimeflow"
 fi
-emit "/nix/var/nix/profiles/default/bin/herdr"
-emit "/run/current-system/sw/bin/herdr"
+emit "/nix/var/nix/profiles/default/bin/vimeflow"
+emit "/run/current-system/sw/bin/vimeflow"
 "#,
     );
 
@@ -842,7 +861,7 @@ fn remote_binary_on_path_any(
     ssh: &RemoteSsh,
     remote_herdr: &RemoteHerdr,
 ) -> io::Result<Option<RemoteHerdr>> {
-    let output = ssh.user_shell_output("command -v herdr")?;
+    let output = ssh.user_shell_output("command -v vimeflow")?;
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         if let Some(candidate) = remote_herdr_from_path_discovery(remote_herdr, &stdout) {
@@ -852,7 +871,7 @@ fn remote_binary_on_path_any(
 
     // Non-POSIX login shells such as xonsh reject `command -v`; retry through
     // /bin/sh while retaining the login-shell probe for shell-initialized PATHs.
-    let output = ssh.sh_output("command -v herdr\n")?;
+    let output = ssh.sh_output("command -v vimeflow\n")?;
     if !output.status.success() {
         return Ok(None);
     }
@@ -889,7 +908,7 @@ fn remote_herdr_from_path(remote_herdr: &RemoteHerdr, path: &str) -> Option<Remo
 }
 
 fn is_mise_shim_path(path: &str) -> bool {
-    path.ends_with("/mise/shims/herdr")
+    path.ends_with("/mise/shims/vimeflow")
 }
 
 fn remote_binary_matches(ssh: &RemoteSsh, remote_herdr: &RemoteHerdr) -> io::Result<bool> {
@@ -974,7 +993,7 @@ fn install_source_description_for(
     }
 
     if local_binary_can_seed_remote {
-        "the current local herdr binary".to_string()
+        "the current local vimeflow binary".to_string()
     } else {
         format!(
             "the {} {} asset for {}",
@@ -1439,7 +1458,7 @@ fn version_label(version: Option<&str>) -> &str {
 }
 
 fn warn_if_remote_bin_not_on_path(ssh: &RemoteSsh) -> io::Result<()> {
-    let output = ssh.user_shell_output("command -v herdr")?;
+    let output = ssh.user_shell_output("command -v vimeflow")?;
     if output.status.success()
         && remote_shell_resolves_managed_install(&String::from_utf8_lossy(&output.stdout))
     {
@@ -1447,7 +1466,7 @@ fn warn_if_remote_bin_not_on_path(ssh: &RemoteSsh) -> io::Result<()> {
     }
 
     eprintln!(
-        "herdr: installed remote binary to ~/.local/bin/herdr, but the remote shell does not resolve `vimeflow` to that path"
+        "vimeflow: installed remote binary to ~/.local/bin/vimeflow, but the remote shell does not resolve `vimeflow` to that path"
     );
     Ok(())
 }
@@ -1457,7 +1476,7 @@ fn remote_shell_resolves_managed_install(stdout: &str) -> bool {
         .lines()
         .next()
         .map(str::trim)
-        .is_some_and(|path| path.ends_with("/.local/bin/herdr"))
+        .is_some_and(|path| path.ends_with("/.local/bin/vimeflow"))
 }
 
 fn download_release_asset(platform: &RemotePlatform) -> io::Result<InstallSource> {
@@ -1610,14 +1629,14 @@ fn confirm_remote_install(
 ) -> io::Result<()> {
     if !io::stdin().is_terminal() {
         return Err(io::Error::other(format!(
-            "matching remote herdr {} is not installed at {}; run from an interactive terminal to approve installation",
+            "matching remote vimeflow {} is not installed at {}; run from an interactive terminal to approve installation",
             current_version(),
             remote_herdr.shell_path
         )));
     }
 
     eprintln!(
-        "matching herdr {} is not installed on {target} for {}.",
+        "matching vimeflow {} is not installed on {target} for {}.",
         current_version(),
         remote_herdr.platform.asset_key()
     );
@@ -1633,7 +1652,7 @@ fn confirm_remote_install(
     if answer == "n" || answer == "no" {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
-            "remote herdr installation cancelled",
+            "remote vimeflow installation cancelled",
         ));
     }
 
@@ -2181,9 +2200,9 @@ mod tests {
 
     #[test]
     fn remote_install_stream_command_avoids_shell_c_wrapper() {
-        let command = remote_install_stream_command("/home/a b/.local/bin/herdr.tmp.123");
+        let command = remote_install_stream_command("/home/a b/.local/bin/vimeflow.tmp.123");
 
-        assert_eq!(command, "tee '/home/a b/.local/bin/herdr.tmp.123'");
+        assert_eq!(command, "tee '/home/a b/.local/bin/vimeflow.tmp.123'");
     }
 
     #[test]
@@ -2194,26 +2213,100 @@ mod tests {
         });
         let prepare = remote_install_prepare_script(&remote_herdr);
 
+        assert!(prepare.contains("dest=\"$HOME/.local/bin/vimeflow\""));
         assert!(prepare.contains("mkdir -p \"$dir\""));
         assert!(prepare.contains("printf '%s\\0%s\\0' \"$tmp\" \"$dest\""));
         assert_eq!(
-            parse_remote_install_paths(b"/home/a b/herdr.tmp.42\0/home/a b/herdr\0").unwrap(),
+            parse_remote_install_paths(b"/home/a b/vimeflow.tmp.42\0/home/a b/vimeflow\0").unwrap(),
             (
-                "/home/a b/herdr.tmp.42".to_string(),
-                "/home/a b/herdr".to_string()
+                "/home/a b/vimeflow.tmp.42".to_string(),
+                "/home/a b/vimeflow".to_string()
             )
         );
         assert_eq!(
-            parse_remote_install_paths(b"/home/a b\n/herdr.tmp.42\0/home/a b\n/herdr\0").unwrap(),
+            parse_remote_install_paths(b"/home/a b\n/vimeflow.tmp.42\0/home/a b\n/vimeflow\0")
+                .unwrap(),
             (
-                "/home/a b\n/herdr.tmp.42".to_string(),
-                "/home/a b\n/herdr".to_string()
+                "/home/a b\n/vimeflow.tmp.42".to_string(),
+                "/home/a b\n/vimeflow".to_string()
             )
         );
         assert_eq!(
-            remote_install_commit_script("/home/a b/herdr.tmp.42", "/home/a b/herdr"),
-            "set -eu\nchmod 755 '/home/a b/herdr.tmp.42'\nmv '/home/a b/herdr.tmp.42' '/home/a b/herdr'\n"
+            remote_install_commit_script("/home/a b/vimeflow.tmp.42", "/home/a b/vimeflow"),
+            "set -eu\nmv '/home/a b/vimeflow.tmp.42' '/home/a b/vimeflow'\n"
         );
+    }
+
+    #[test]
+    fn remote_install_preserves_upstream_and_rejects_incompatible_sources() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = remote_env_lock().lock().unwrap();
+        let dir = private_download_dir("install-test").unwrap();
+        let bin = dir.join(".local/bin");
+        fs::create_dir_all(&bin).unwrap();
+        // Run the SSH commands locally with an isolated remote home.
+        let ssh_path = dir.join("ssh");
+        fs::write(
+            &ssh_path,
+            "#!/bin/sh\nexec env HOME=\"$2\" /bin/sh -c \"$3\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&ssh_path, fs::Permissions::from_mode(0o755)).unwrap();
+        let old_path = std::env::var_os("PATH");
+        let path = std::env::join_paths(
+            std::iter::once(dir.clone()).chain(old_path.iter().flat_map(std::env::split_paths)),
+        )
+        .unwrap();
+        std::env::set_var("PATH", path);
+        let ssh = RemoteSsh::new(dir.to_string_lossy().into_owned(), false);
+        let remote = RemoteHerdr::for_platform(RemotePlatform::local());
+        let source = dir.join("source with 'quotes'");
+        fs::write(bin.join("herdr"), "upstream installation").unwrap();
+        let outcomes = [
+            (format!("vimeflow {}", current_version()), CURRENT_PROTOCOL, true),
+            (format!("herdr {}", current_version()), CURRENT_PROTOCOL, false),
+            ("vimeflow wrong-version".into(), CURRENT_PROTOCOL, false),
+            (format!("vimeflow {}", current_version()), CURRENT_PROTOCOL + 1, false),
+            (String::new(), CURRENT_PROTOCOL, false),
+        ]
+        .into_iter()
+        .map(|(banner, protocol, compatible)| {
+            let contents = format!(
+                "#!/bin/sh\ncase \"$1\" in\n--version) printf '%s\\n' {};;\nstatus) printf '%s\\n' '{{\"protocol\":{protocol}}}';;\nesac\n",
+                shell_quote(&banner)
+            );
+            fs::write(&source, &contents).unwrap();
+            fs::write(bin.join("vimeflow"), "existing fork installation").unwrap();
+            let result = ssh.install_herdr(&remote, &source);
+            (
+                compatible,
+                contents,
+                result,
+                fs::read_to_string(bin.join("herdr")).unwrap(),
+                fs::read_to_string(bin.join("vimeflow")).unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+        match old_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+        fs::remove_dir_all(dir).unwrap();
+
+        for (compatible, contents, result, upstream, fork) in outcomes {
+            assert_eq!(upstream, "upstream installation");
+            assert_eq!(result.is_ok(), compatible, "{result:?}");
+            if compatible {
+                assert_eq!(fork, contents);
+            } else {
+                assert_eq!(fork, "existing fork installation");
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains(REMOTE_BINARY_ENV_VAR));
+            }
+        }
     }
 
     #[test]
@@ -2437,7 +2530,7 @@ mod tests {
         });
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec \"$HOME/.local/bin/herdr\" remote-client-bridge"
+            "exec \"$HOME/.local/bin/vimeflow\" remote-client-bridge"
         );
     }
 
@@ -2447,12 +2540,12 @@ mod tests {
             os: "linux",
             arch: "x86_64",
         });
-        let remote_herdr = remote_herdr_from_path_discovery(&remote_herdr, "/usr/bin/herdr\n")
+        let remote_herdr = remote_herdr_from_path_discovery(&remote_herdr, "/usr/bin/vimeflow\n")
             .expect("path binary");
 
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec /usr/bin/herdr remote-client-bridge"
+            "exec /usr/bin/vimeflow remote-client-bridge"
         );
     }
 
@@ -2463,12 +2556,12 @@ mod tests {
             arch: "x86_64",
         });
         let remote_herdr =
-            remote_herdr_from_path_discovery(&remote_herdr, "/opt/herdr bin/herdr\n")
+            remote_herdr_from_path_discovery(&remote_herdr, "/opt/vimeflow bin/vimeflow\n")
                 .expect("path binary");
 
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec '/opt/herdr bin/herdr' remote-client-bridge"
+            "exec '/opt/vimeflow bin/vimeflow' remote-client-bridge"
         );
     }
 
@@ -2479,12 +2572,12 @@ mod tests {
             arch: "aarch64",
         });
         let remote_herdr =
-            remote_herdr_from_path_discovery(&remote_herdr, "/opt/homebrew/bin/herdr\n")
+            remote_herdr_from_path_discovery(&remote_herdr, "/opt/homebrew/bin/vimeflow\n")
                 .expect("path binary");
 
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec /opt/homebrew/bin/herdr remote-client-bridge"
+            "exec /opt/homebrew/bin/vimeflow remote-client-bridge"
         );
         assert_eq!(remote_herdr.platform.asset_key(), "macos-aarch64");
     }
@@ -2497,12 +2590,12 @@ mod tests {
         });
         let candidates = remote_herdrs_from_path_discovery(
             &remote_herdr,
-            "/usr/bin/herdr\nbin/herdr\n /opt/herdr bin/herdr\n",
+            "/usr/bin/vimeflow\nbin/vimeflow\n /opt/vimeflow bin/vimeflow\n",
         );
 
         assert_eq!(candidates.len(), 2);
-        assert_eq!(candidates[0].shell_path, "/usr/bin/herdr");
-        assert_eq!(candidates[1].shell_path, "'/opt/herdr bin/herdr'");
+        assert_eq!(candidates[0].shell_path, "/usr/bin/vimeflow");
+        assert_eq!(candidates[1].shell_path, "'/opt/vimeflow bin/vimeflow'");
     }
 
     #[test]
@@ -2513,13 +2606,13 @@ mod tests {
         });
         let candidates = remote_herdrs_from_path_discovery(
             &remote_herdr,
-            "/home/can/.local/share/mise/shims/herdr\n/home/can/.local/share/mise/installs/herdr/0.7.1/bin/herdr\n",
+            "/home/can/.local/share/mise/shims/vimeflow\n/home/can/.local/share/mise/installs/vimeflow/0.7.1/bin/vimeflow\n",
         );
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(
             candidates[0].shell_path,
-            "/home/can/.local/share/mise/installs/herdr/0.7.1/bin/herdr"
+            "/home/can/.local/share/mise/installs/vimeflow/0.7.1/bin/vimeflow"
         );
     }
 
@@ -2530,21 +2623,22 @@ mod tests {
             arch: "x86_64",
         });
 
-        assert!(script.contains("emit \"$home/.local/bin/herdr\""));
-        assert!(!script.contains("mise/shims/herdr"));
+        assert!(script.contains("emit \"$home/.local/bin/vimeflow\""));
+        assert!(!script.contains("mise/shims/vimeflow"));
         assert!(script.contains(&format!("version={}", shell_quote(&current_version()))));
+        assert!(script
+            .contains("emit \"$home/.local/share/mise/installs/vimeflow/$version/bin/vimeflow\""));
         assert!(
-            script.contains("emit \"$home/.local/share/mise/installs/herdr/$version/bin/herdr\"")
+            script.contains("emit \"$home/.local/share/mise/installs/vimeflow/$version/vimeflow\"")
         );
-        assert!(script.contains("emit \"$home/.local/share/mise/installs/herdr/$version/herdr\""));
         assert!(script.contains(
-            "emit \"$home/.local/share/mise/installs/github-ogulcancelik-herdr/$version/herdr\""
+            "emit \"$home/.local/share/mise/installs/github-winoooops-vimeflow-terminal/$version/vimeflow\""
         ));
-        assert!(script.contains("emit \"$home/.nix-profile/bin/herdr\""));
-        assert!(script.contains("emit \"/etc/profiles/per-user/$user/bin/herdr\""));
-        assert!(script.contains("emit \"/run/current-system/sw/bin/herdr\""));
-        assert!(script.contains("emit \"/home/linuxbrew/.linuxbrew/bin/herdr\""));
-        assert!(!script.contains("emit \"/opt/homebrew/bin/herdr\""));
+        assert!(script.contains("emit \"$home/.nix-profile/bin/vimeflow\""));
+        assert!(script.contains("emit \"/etc/profiles/per-user/$user/bin/vimeflow\""));
+        assert!(script.contains("emit \"/run/current-system/sw/bin/vimeflow\""));
+        assert!(script.contains("emit \"/home/linuxbrew/.linuxbrew/bin/vimeflow\""));
+        assert!(!script.contains("emit \"/opt/homebrew/bin/vimeflow\""));
     }
 
     #[test]
@@ -2554,9 +2648,9 @@ mod tests {
             arch: "aarch64",
         });
 
-        assert!(script.contains("emit \"/opt/homebrew/bin/herdr\""));
-        assert!(script.contains("emit \"/usr/local/bin/herdr\""));
-        assert!(!script.contains("emit \"/home/linuxbrew/.linuxbrew/bin/herdr\""));
+        assert!(script.contains("emit \"/opt/homebrew/bin/vimeflow\""));
+        assert!(script.contains("emit \"/usr/local/bin/vimeflow\""));
+        assert!(!script.contains("emit \"/home/linuxbrew/.linuxbrew/bin/vimeflow\""));
     }
 
     #[test]
@@ -2566,12 +2660,12 @@ mod tests {
             arch: "x86_64",
         });
         let remote_herdr =
-            remote_herdr_from_path_discovery(&remote_herdr, "/opt/herdr's/bin/herdr\n")
+            remote_herdr_from_path_discovery(&remote_herdr, "/opt/vimeflow's/bin/vimeflow\n")
                 .expect("path binary");
 
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec '/opt/herdr'\\''s/bin/herdr' remote-client-bridge"
+            "exec '/opt/vimeflow'\\''s/bin/vimeflow' remote-client-bridge"
         );
     }
 
@@ -2581,7 +2675,7 @@ mod tests {
             os: "linux",
             arch: "x86_64",
         });
-        let remote_herdr = remote_herdr_from_path_discovery(&remote_herdr, "bin/herdr\n");
+        let remote_herdr = remote_herdr_from_path_discovery(&remote_herdr, "bin/vimeflow\n");
 
         assert!(remote_herdr.is_none());
     }
@@ -2600,13 +2694,13 @@ mod tests {
     #[test]
     fn remote_shell_path_warning_accepts_managed_install() {
         assert!(remote_shell_resolves_managed_install(
-            "/home/can/.local/bin/herdr\n"
+            "/home/can/.local/bin/vimeflow\n"
         ));
         assert!(remote_shell_resolves_managed_install(
-            "/Users/can/.local/bin/herdr\n"
+            "/Users/can/.local/bin/vimeflow\n"
         ));
         assert!(!remote_shell_resolves_managed_install(
-            "/usr/local/bin/herdr\n"
+            "/usr/local/bin/vimeflow\n"
         ));
         assert!(!remote_shell_resolves_managed_install(""));
     }
@@ -3004,7 +3098,7 @@ mod tests {
 
         assert_eq!(
             install_source_description_for(&platform, None, true),
-            "the current local herdr binary"
+            "the current local vimeflow binary"
         );
     }
 

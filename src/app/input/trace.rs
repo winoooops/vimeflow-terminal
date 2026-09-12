@@ -285,6 +285,7 @@ impl AppState {
             return;
         };
         self.agent_trace_panel = Some(trace_panel(&call, now_unix_ms()));
+        self.agent_card_cursor = Some(pane);
         self.mode = Mode::Agents;
     }
 
@@ -726,11 +727,22 @@ mod tests {
         assert_eq!(app.state.trace_anchor_pane(), focused);
     }
 
-    #[test]
-    fn reconciliation_preserves_mouse_only_trace_selection() {
-        let mut state = state_with_agent();
+    #[tokio::test]
+    async fn mouse_trace_detail_enters_agents_mode_on_the_selected_card() {
+        let mut app = super::super::app_for_mouse_test();
+        app.state = state_with_agent();
+        let state = &mut app.state;
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("other"));
+        state.ensure_test_terminals();
+        for terminal in state.terminals.values_mut() {
+            terminal.detected_agent = Some(crate::detect::Agent::Claude);
+            terminal.state = crate::detect::AgentState::Working;
+        }
+        state.active = Some(1);
         let pane = state.trace_anchor_pane().unwrap();
-        let workspace = &state.workspaces[0];
+        let workspace = &state.workspaces[1];
         let id = crate::workspace::public_pane_id_for_number(
             &workspace.id,
             workspace.public_pane_number(pane).unwrap(),
@@ -742,13 +754,34 @@ mod tests {
         state.agent_telemetry.insert(id, telemetry);
         state.select_trace(pane, "trace");
 
-        crate::ui::compute_view(&mut state, Rect::new(0, 0, 100, 20));
+        crate::ui::compute_view(state, Rect::new(0, 0, 100, 20));
         state.reconcile_trace_visibility();
         assert_eq!(state.mode, Mode::Terminal);
         assert!(state.agent_card_cursor.is_none());
         assert_eq!(state.agent_trace_focus, Some((pane, "trace".into())));
         state.open_trace_detail();
         assert!(state.agent_trace_panel.is_some());
+        assert_eq!(state.mode, Mode::Agents);
+        assert_eq!(state.agent_card_cursor, Some(pane));
+
+        // Close the detail, return to Cards, descend again, then commit.
+        for key in [KeyCode::Esc, KeyCode::Char('h'), KeyCode::Char('l')] {
+            app.handle_trace_key(crate::input::TerminalKey::new(
+                key,
+                crossterm::event::KeyModifiers::empty(),
+            ));
+            assert_eq!(app.state.agent_card_cursor, Some(pane));
+        }
+        assert_eq!(app.state.agent_trace_focus, Some((pane, "trace".into())));
+        for key in [KeyCode::Char('h'), KeyCode::Enter] {
+            app.handle_trace_key(crate::input::TerminalKey::new(
+                key,
+                crossterm::event::KeyModifiers::empty(),
+            ));
+        }
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.trace_anchor_pane(), Some(pane));
     }
 
     #[tokio::test]
