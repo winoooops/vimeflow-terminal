@@ -26,6 +26,7 @@ Modified upstream files
 - scripts/windows_check.ps1
 - nix/package.nix
 - src/update.rs
+- src/remote/unix.rs
 - src/cli.rs
 - src/cli/server_not_running.rs
 - src/cli/spec.rs

@@ -25,7 +25,10 @@ use crate::layout::PaneId;
 
 impl AppState {
     fn agent_cards_visible(&self) -> bool {
-        !self.sidebar_collapsed && self.agents_view == crate::config::AgentsViewConfig::Cards
+        let body = crate::ui::agent_panel_items_rect(self, self.agent_panel_rect(), false);
+        self.agents_view == crate::config::AgentsViewConfig::Cards
+            && body.width > 0
+            && body.height > 0
     }
 
     /// The card traces navigate: the keyboard cursor while `Mode::Agents` is
@@ -310,10 +313,28 @@ impl AppState {
             .min(rendered.saturating_sub(1));
     }
 
-    /// Drops a cursor or focus that no longer names a rendered row. Called
-    /// every draw, so neither can point at something the user cannot see.
+    /// Geometry can be computed for background clients too; only the
+    /// foreground view may dismiss navigation surfaces that no longer fit.
+    pub(crate) fn reconcile_trace_visibility(&mut self) {
+        let area = self.view.terminal_area;
+        if !self.agent_cards_visible()
+            || (self.agent_trace_panel.is_some()
+                && (crate::ui::trace_panel_width(area) < 5 || area.height < 7))
+        {
+            self.exit_agents_mode();
+        }
+    }
+
+    /// Drops navigation-owned state after any mode exit, and reconciles row
+    /// identities before each draw independently of client geometry.
     pub(crate) fn reconcile_trace_focus(&mut self) {
-        if !self.agent_cards_visible() {
+        // Mouse-only trace selection has no card cursor or detail panel and
+        // remains supported outside Agents mode.
+        if (self.mode != Mode::Agents
+            && (self.agent_card_cursor.is_some() || self.agent_trace_panel.is_some()))
+            || self.sidebar_collapsed
+            || self.agents_view != crate::config::AgentsViewConfig::Cards
+        {
             self.exit_agents_mode();
             return;
         }
@@ -484,6 +505,7 @@ fn trace_panel(call: &Value, now_unix_ms: u64) -> Panel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::layout::Rect;
 
     const NOW: u64 = 1_756_000_000_000;
 
@@ -491,12 +513,14 @@ mod tests {
         let mut state = AppState::test_new();
         state.workspaces = vec![crate::workspace::Workspace::test_new("agent")];
         state.active = Some(0);
+        state.mode = Mode::Terminal;
         state.ensure_test_terminals();
         let terminal = state.terminals.values_mut().next().unwrap();
         terminal.detected_agent = Some(crate::detect::Agent::Claude);
         terminal.state = crate::detect::AgentState::Working;
         state.sidebar_collapsed = false;
         state.agents_view = crate::config::AgentsViewConfig::Cards;
+        crate::ui::compute_view(&mut state, Rect::new(0, 0, 100, 20));
         state
     }
 
@@ -540,6 +564,110 @@ mod tests {
         assert!(state.agent_card_cursor.is_some());
         assert!(state.agent_trace_focus.is_none());
         assert!(state.agent_trace_panel.is_none());
+    }
+
+    #[test]
+    fn agents_entry_requires_sidebar_body_geometry() {
+        for area in [Rect::new(0, 0, 44, 20), Rect::new(0, 0, 100, 3)] {
+            let mut state = state_with_agent();
+            crate::ui::compute_view(&mut state, area);
+            state.enter_agents_mode();
+            assert_ne!(state.mode, Mode::Agents);
+            assert!(state.agent_card_cursor.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn only_foreground_geometry_dismisses_agents_navigation_and_detail() {
+        for (area, detail) in [
+            (Rect::new(0, 0, 44, 20), false),
+            (Rect::new(0, 0, 44, 20), true),
+            (Rect::new(0, 0, 100, 7), true),
+        ] {
+            let mut app = super::super::app_for_mouse_test();
+            app.state = state_with_agent();
+            app.state.enter_agents_mode();
+            if detail {
+                app.state.agent_trace_panel = Some(trace_panel(&serde_json::json!({}), NOW));
+            }
+
+            // Background rendering computes a temporary view without owning
+            // the foreground's input capture state.
+            crate::server::render_stream::render_virtual_with_runtime_registry(
+                &mut app.state,
+                &app.terminal_runtimes,
+                area,
+                false,
+                crate::kitty_graphics::HostCellSize::default(),
+            );
+            assert_eq!(app.state.mode, Mode::Agents);
+            assert_eq!(app.state.agent_trace_panel.is_some(), detail);
+
+            crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 100, 20));
+            app.reconcile_panels_from_foreground_view();
+            assert_eq!(app.state.mode, Mode::Agents);
+            assert_eq!(app.state.agent_trace_panel.is_some(), detail);
+
+            crate::ui::compute_view(&mut app.state, area);
+            app.reconcile_panels_from_foreground_view();
+            assert_eq!(app.state.mode, Mode::Terminal);
+            assert!(app.state.agent_card_cursor.is_none());
+            assert!(app.state.agent_trace_panel.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_click_clears_navigation_cursor_on_reconciliation() {
+        let mut app = super::super::app_for_mouse_test();
+        app.state = state_with_agent();
+        app.state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("other"));
+        app.state.ensure_test_terminals();
+        for terminal in app.state.terminals.values_mut() {
+            terminal.detected_agent = Some(crate::detect::Agent::Claude);
+            terminal.state = crate::detect::AgentState::Working;
+        }
+        app.state.enter_agents_mode();
+        let focused = app.state.agent_card_cursor;
+        app.state.move_card_cursor(1);
+        assert_ne!(app.state.agent_card_cursor, focused);
+
+        let pane = app.state.view.pane_infos[0].inner_rect;
+        app.handle_mouse(super::super::mouse(
+            MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            pane.x,
+            pane.y,
+        ));
+        assert_eq!(app.state.mode, Mode::Terminal);
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 100, 20));
+        assert!(app.state.agent_card_cursor.is_none());
+        assert_eq!(app.state.trace_anchor_pane(), focused);
+    }
+
+    #[test]
+    fn reconciliation_preserves_mouse_only_trace_selection() {
+        let mut state = state_with_agent();
+        let pane = state.trace_anchor_pane().unwrap();
+        let workspace = &state.workspaces[0];
+        let id = crate::workspace::public_pane_id_for_number(
+            &workspace.id,
+            workspace.public_pane_number(pane).unwrap(),
+        );
+        let mut telemetry = PaneTelemetry::with_agent("claude");
+        telemetry.tool_calls.push_back(serde_json::json!({
+            "toolUseId": "trace", "status": "done", "tool": "Bash"
+        }));
+        state.agent_telemetry.insert(id, telemetry);
+        state.select_trace(pane, "trace");
+
+        crate::ui::compute_view(&mut state, Rect::new(0, 0, 100, 20));
+        state.reconcile_trace_visibility();
+        assert_eq!(state.mode, Mode::Terminal);
+        assert!(state.agent_card_cursor.is_none());
+        assert_eq!(state.agent_trace_focus, Some((pane, "trace".into())));
+        state.open_trace_detail();
+        assert!(state.agent_trace_panel.is_some());
     }
 
     #[tokio::test]

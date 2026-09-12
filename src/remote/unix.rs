@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 //! Remote thin-client launcher over SSH command stdio.
 
 use std::collections::BTreeMap;
@@ -901,14 +902,19 @@ fn remote_binary_matches(ssh: &RemoteSsh, remote_herdr: &RemoteHerdr) -> io::Res
         return Ok(false);
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(remote_binary_status_matches(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+fn remote_binary_status_matches(stdout: &str) -> bool {
     let mut lines = stdout.lines();
     let version = lines.next().unwrap_or_default().trim();
     let status = lines.next().unwrap_or_default();
-    Ok(version == format!("herdr {}", current_version())
+    version == format!("vimeflow {}", current_version())
         && parse_client_status_json(status)
             .map(|status| status.protocol == CURRENT_PROTOCOL)
-            .unwrap_or(false))
+            .unwrap_or(false)
 }
 
 fn remote_binary_exists(ssh: &RemoteSsh, remote_herdr: &RemoteHerdr) -> io::Result<bool> {
@@ -2613,6 +2619,26 @@ mod tests {
             Some(8)
         );
         assert!(parse_client_status_json(r#"{"protocol":"unknown"}"#).is_none());
+    }
+
+    #[test]
+    fn remote_binary_status_requires_vimeflow_version_and_protocol() {
+        let version = current_version();
+        for (banner, protocol, expected) in [
+            (format!("vimeflow {version}"), CURRENT_PROTOCOL, true),
+            (format!("herdr {version}"), CURRENT_PROTOCOL, false),
+            ("vimeflow wrong-version".into(), CURRENT_PROTOCOL, false),
+            (format!("vimeflow {version}"), CURRENT_PROTOCOL + 1, false),
+        ] {
+            let stdout = format!("{banner}\n{{\"protocol\":{protocol}}}\n");
+            assert_eq!(remote_binary_status_matches(&stdout), expected, "{stdout}");
+        }
+        assert!(!remote_binary_status_matches(&format!(
+            "vimeflow {version}\n"
+        )));
+        assert!(!remote_binary_status_matches(&format!(
+            "vimeflow {version}\n{{\"protocol\":\"unknown\"}}"
+        )));
     }
 
     #[test]

@@ -856,6 +856,7 @@ impl Mode {
                 | Mode::Navigator
                 | Mode::Copy
                 | Mode::Resize
+                | Mode::Agents
                 | Mode::ConfirmClose
                 | Mode::ConfirmRemoveWorktree
                 | Mode::ContextMenu

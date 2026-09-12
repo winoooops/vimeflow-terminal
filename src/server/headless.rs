@@ -1123,7 +1123,7 @@ impl HeadlessServer {
                 area,
             );
         }
-        self.app.reconcile_island_panel_from_foreground_view();
+        self.app.reconcile_panels_from_foreground_view();
 
         // Shared runtime size changes affect pane wrapping and foreground-driven
         // rendering semantics. Force one fresh frame to every remaining client
@@ -4217,7 +4217,7 @@ impl HeadlessServer {
                             render_cell_size,
                         );
                     if is_foreground {
-                        self.app.reconcile_island_panel_from_foreground_view();
+                        self.app.reconcile_panels_from_foreground_view();
                     }
                     crate::render_prof::duration_since(
                         "full_render.render_virtual",
