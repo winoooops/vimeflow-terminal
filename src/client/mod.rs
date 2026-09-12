@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 //! Thin client mode — connects to the server's client socket.
 //!
 //! The client:

@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, IsTerminal, Read, Write};

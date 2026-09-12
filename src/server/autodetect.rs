@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 //! Auto-detect launch behavior for the `vimeflow` command.
 //!
 //! When the user runs `vimeflow` with no subcommand:

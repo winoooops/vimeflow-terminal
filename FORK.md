@@ -246,6 +246,35 @@ the top of the file:
 | `tests/cli/hooks.rs` | Verify the QoderCLI hook calls vimeflow with inherited session routing even beside upstream herdr. | PR #17 blocking fixes |
 | `tests/cli/surface.rs` | Verify both completion generators register vimeflow without starting a session. | PR #17 blocking fixes |
 
+| `src/cli/agent.rs` | Name vimeflow in agent command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/api.rs` | Name vimeflow in api command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/integration.rs` | Name vimeflow in integration command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/notification.rs` | Name vimeflow in notification command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/pane.rs` | Name vimeflow in pane command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/plugin.rs` | Name vimeflow in plugin command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/server.rs` | Name vimeflow in server command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/tab.rs` | Name vimeflow in tab command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/workspace.rs` | Name vimeflow in workspace command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/worktree.rs` | Name vimeflow in worktree command usage and diagnostics. | PR #17 blocking fixes |
+| `src/client/mod.rs` | Name vimeflow in server-start and reattach guidance and matching tests. | PR #17 blocking fixes |
+| `src/server/autodetect.rs` | Name vimeflow in launch documentation, startup diagnostics, and restart guidance tests. | PR #17 blocking fixes |
+| `src/session.rs` | Build vimeflow session attach/stop commands and align usage and restart guidance tests. | PR #17 blocking fixes |
+| `src/ui/release_notes.rs` | Name the fork executable in update guidance and matching rendering tests. | PR #17 blocking fixes |
+| `tests/api_ping.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/auto_detect.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/client_mode.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/cross_area.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/detach_reattach.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/live_handoff.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/multi_client.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/server_headless.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/cli/agents.rs` | Invoke the renamed vimeflow binary in agent CLI test commands. | PR #17 blocking fixes |
+| `tests/cli/harness.rs` | Launch vimeflow and locate its configuration, session, and plugin directories in the CLI harness. | PR #17 blocking fixes |
+| `tests/cli/plugins.rs` | Use the vimeflow-dev directory in plugin CLI tests. | PR #17 blocking fixes |
+| `tests/cli/sessions.rs` | Invoke vimeflow and expect the renamed session attach and startup hints. | PR #17 blocking fixes |
+| `tests/cli/workspace.rs` | Expect vimeflow in configuration-check usage output. | PR #17 blocking fixes |
+| `tests/support/mod.rs` | Identify test servers by the renamed vimeflow binary path on Linux. | PR #17 blocking fixes |
+
 Non-commentable modified files must also be listed in `MODIFICATIONS` beside
 `LICENSE`.
 

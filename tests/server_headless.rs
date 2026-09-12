@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 //! Integration tests for headless server mode.
 
 mod support;

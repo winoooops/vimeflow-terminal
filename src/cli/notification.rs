@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use crate::api::schema::{Method, NotificationShowParams, NotificationShowSound, Request};
 use crate::config::ToastHerdrPosition;
 

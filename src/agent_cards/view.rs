@@ -117,7 +117,7 @@ pub(crate) fn build_card(
         0
     };
     let budget = (body_height as usize).saturating_sub(reserve);
-    let (mut lines, spans) = match (expanded, input.trace_focus.is_some()) {
+    let (mut lines, mut spans) = match (expanded, input.trace_focus.is_some()) {
         // A focused card renders its whole ring, and the watcher does that
         // regardless of `trace_lines` — so shrinking that knob cannot make it
         // fit, and trying would fall through to the traceless compact card:
@@ -127,6 +127,22 @@ pub(crate) fn build_card(
         (true, false) => fit_expanded(telemetry, &mut ctx, budget),
         (false, _) => (view::compact_card(telemetry, &ctx), Vec::new()),
     };
+
+    // On short panels, keep compact identity and leave at least one trace row.
+    if let Some(first) = spans
+        .iter()
+        .map(|(_, line)| *line)
+        .min()
+        .filter(|first| input.trace_focus.is_some() && *first >= body_height as usize)
+    {
+        let mut compact = view::compact_card(telemetry, &ctx);
+        compact.truncate(body_height.saturating_sub(1) as usize);
+        let removed = first - compact.len();
+        lines.splice(..first, compact);
+        for (_, line) in &mut spans {
+            *line -= removed;
+        }
+    }
 
     // A focused ring is routinely taller than the panel, and herdr scrolls the
     // agents panel by whole entries, so without this the selection walks off
@@ -524,8 +540,7 @@ mod tests {
             })
             .collect();
 
-        // The card has a fixed preamble before its first trace row; below that
-        // no panel can show one. Derive it rather than assume it.
+        // Derive the full preamble, and cover the compact fallback below it.
         let roomy = card(Some(&telemetry), Some("id0"), true, 200);
         let first_trace = roomy
             .trace_spans
@@ -537,7 +552,7 @@ mod tests {
         // Every height that can fit a trace row must actually show one. These
         // are the heights that used to collapse to a traceless compact card,
         // because the focused ring is far taller than the panel.
-        for height in [first_trace as u16 + 1, 20, 40] {
+        for height in [1, 3, 6, 9, first_trace as u16 + 1, 20, 40] {
             let built = card(Some(&telemetry), Some("id0"), true, height);
             assert!(
                 !built.trace_spans.is_empty(),
@@ -606,6 +621,38 @@ mod tests {
             rendered.iter().any(|line| line.contains("vimeflow")),
             "workspace identity scrolled away: {rendered:?}"
         );
+    }
+
+    #[test]
+    fn default_24_row_terminal_keeps_compact_identity_and_selected_trace() {
+        let mut state = crate::app::state::AppState::test_new();
+        crate::ui::compute_view(&mut state, ratatui::layout::Rect::new(0, 0, 100, 24));
+        let (_, panel) = crate::ui::expanded_sidebar_sections(
+            state.view.sidebar_rect,
+            state.sidebar_section_split,
+        );
+        let body = crate::ui::agent_panel_items_rect(&state, panel, false);
+        assert_eq!(body.height, 9);
+
+        let mut telemetry = telemetry();
+        telemetry.tool_calls = (0..40)
+            .map(|i| {
+                serde_json::json!({
+                    "toolUseId": format!("id{i}"), "tool": "Edit",
+                    "args": format!("file{i}.rs"), "status": "done"
+                })
+            })
+            .collect();
+        let compact = plain(&card(Some(&telemetry), None, false, body.height));
+        for id in ["id39", "id20", "id0"] {
+            let built = card(Some(&telemetry), Some(id), true, body.height);
+            assert_eq!(&plain(&built)[..COMPACT_CARD_LINES], compact.as_slice());
+            let (_, span) = built.trace_spans.iter().find(|(key, _)| key == id).unwrap();
+            assert!(span.start >= COMPACT_CARD_LINES && span.start < body.height as usize);
+            assert!(built.lines[span.start]
+                .iter()
+                .any(|span| span.style.reverse));
+        }
     }
 
     #[test]

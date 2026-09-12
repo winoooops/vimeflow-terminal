@@ -100,6 +100,7 @@ impl AppState {
         self.agent_card_cursor = Some(pane);
         self.agent_trace_focus = None;
         self.mode = Mode::Agents;
+        self.set_island_panel_open(false);
         self.ensure_agent_panel_entry_visible(start);
     }
 
@@ -564,6 +565,86 @@ mod tests {
         assert!(state.agent_card_cursor.is_some());
         assert!(state.agent_trace_focus.is_none());
         assert!(state.agent_trace_panel.is_none());
+    }
+
+    #[tokio::test]
+    async fn agents_entry_closes_island_panel_and_keeps_input_source_in_sync() {
+        use crate::input::TerminalKey;
+        use crate::raw_input::RawInputEvent;
+        use crossterm::event::KeyModifiers;
+
+        let mut app = super::super::app_for_mouse_test();
+        app.state = state_with_agent();
+        app.state.switch_ascii_input_source_in_prefix = true;
+        app.state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("other"));
+        app.state.ensure_test_terminals();
+        for terminal in app.state.terminals.values_mut() {
+            terminal.detected_agent = Some(crate::detect::Agent::Claude);
+            terminal.state = crate::detect::AgentState::Working;
+        }
+        let workspace = &app.state.workspaces[0];
+        app.state
+            .push_island_record(crate::app::state::IslandRecord {
+                id: 0,
+                workspace_id: workspace.id.clone(),
+                tab_id: crate::workspace::public_tab_id_for_number(
+                    &workspace.id,
+                    workspace.tabs[0].number,
+                ),
+                pane_id: workspace.tabs[0].root_pane,
+                agent: Some(crate::detect::Agent::Claude),
+                reason: crate::app::state::IslandReason::TurnComplete,
+                text: "turn complete".into(),
+                at: std::time::SystemTime::UNIX_EPOCH,
+                read: false,
+            })
+            .unwrap();
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 100, 24));
+        let prefix = TerminalKey::new(app.state.prefix_code, app.state.prefix_mods);
+        for (command, open) in [('i', true), ('a', false)] {
+            app.route_client_events(
+                vec![
+                    RawInputEvent::Key(prefix.clone()),
+                    RawInputEvent::Key(TerminalKey::new(
+                        KeyCode::Char(command),
+                        KeyModifiers::empty(),
+                    )),
+                ],
+                false,
+            );
+            assert_eq!(app.state.island_panel_open, open);
+        }
+        assert_eq!(app.state.mode, Mode::Agents);
+        let first = app.state.agent_card_cursor;
+        for (command, on_first) in [('j', false), ('k', true), ('j', false)] {
+            app.route_client_events(
+                vec![RawInputEvent::Key(TerminalKey::new(
+                    KeyCode::Char(command),
+                    KeyModifiers::empty(),
+                ))],
+                false,
+            );
+            assert_eq!(app.state.agent_card_cursor == first, on_first);
+        }
+        app.route_client_events(
+            vec![RawInputEvent::Key(TerminalKey::new(
+                KeyCode::Enter,
+                KeyModifiers::empty(),
+            ))],
+            false,
+        );
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(!app.state.island_records[0].read);
+        let mut input_source_events = Vec::new();
+        while let Ok(event) = app.event_rx.try_recv() {
+            if let crate::events::AppEvent::PrefixInputSource { active } = event {
+                input_source_events.push(active);
+            }
+        }
+        assert_eq!(input_source_events, vec![true, false]);
     }
 
     #[test]

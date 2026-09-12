@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 pub(super) use std::fs;
 pub(super) use std::io::{BufRead, BufReader, Write};
 pub(super) use std::os::unix::net::{UnixListener, UnixStream};

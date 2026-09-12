@@ -87,6 +87,35 @@ Modified upstream files
 - tests/cli/hooks.rs
 - tests/cli/surface.rs
 
+- src/cli/agent.rs
+- src/cli/api.rs
+- src/cli/integration.rs
+- src/cli/notification.rs
+- src/cli/pane.rs
+- src/cli/plugin.rs
+- src/cli/server.rs
+- src/cli/tab.rs
+- src/cli/workspace.rs
+- src/cli/worktree.rs
+- src/client/mod.rs
+- src/server/autodetect.rs
+- src/session.rs
+- src/ui/release_notes.rs
+- tests/api_ping.rs
+- tests/auto_detect.rs
+- tests/client_mode.rs
+- tests/cross_area.rs
+- tests/detach_reattach.rs
+- tests/live_handoff.rs
+- tests/multi_client.rs
+- tests/server_headless.rs
+- tests/cli/agents.rs
+- tests/cli/harness.rs
+- tests/cli/plugins.rs
+- tests/cli/sessions.rs
+- tests/cli/workspace.rs
+- tests/support/mod.rs
+
 Each modified commentable source or workflow file contains the Apache-2.0
 section 4(b) notice:
 

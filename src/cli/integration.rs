@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use crate::api::schema::IntegrationTarget;
 
 pub(super) fn run_integration_command(args: &[String]) -> std::io::Result<i32> {

@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 const API_SCHEMA_JSON: &str = include_str!("../../docs/next/api/herdr-api.schema.json");
 
 use crate::api::schema::{EmptyParams, Method, Request};

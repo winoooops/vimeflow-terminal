@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use crate::api::schema::{
     Method, OutputMatch, PaneCurrentParams, PaneDirection, PaneEdgesParams,
     PaneFocusDirectionParams, PaneLayoutParams, PaneListParams, PaneMoveDestination,

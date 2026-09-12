@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use crate::api::schema::{EmptyParams, Method, Request, ServerLiveHandoffParams};
 
 pub(super) fn run_server_command(args: &[String]) -> std::io::Result<Option<i32>> {

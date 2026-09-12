@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 #![allow(dead_code)]
 
 use std::collections::HashSet;

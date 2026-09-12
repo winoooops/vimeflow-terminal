@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
