@@ -371,6 +371,10 @@ impl App {
         source_id: super::InputSourceId,
         mouse: MouseEvent,
     ) {
+        #[cfg(unix)]
+        if self.state.handle_trace_mouse(mouse) {
+            return;
+        }
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.pending_url_click_sources.remove(&source_id);

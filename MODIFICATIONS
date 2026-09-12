@@ -64,6 +64,27 @@ Modified upstream files
 - src/ui/status.rs
 - src/ui/tab_surface.rs
 - src/ui/tabs.rs
+- flake.nix
+- skills/herdr/SKILL.md
+- src/cli/completion.rs
+- src/integration/assets/antigravity_cli/herdr-agent-state.ps1
+- src/integration/assets/antigravity_cli/herdr-agent-state.sh
+- src/integration/assets/claude/herdr-agent-state.ps1
+- src/integration/assets/claude/herdr-agent-state.sh
+- src/integration/assets/codex/herdr-agent-state.ps1
+- src/integration/assets/codex/herdr-agent-state.sh
+- src/integration/assets/copilot/herdr-agent-state.ps1
+- src/integration/assets/copilot/herdr-agent-state.sh
+- src/integration/assets/droid/herdr-agent-state.ps1
+- src/integration/assets/droid/herdr-agent-state.sh
+- src/integration/assets/kimi/herdr-agent-state.ps1
+- src/integration/assets/kimi/herdr-agent-state.sh
+- src/integration/assets/qodercli/herdr-agent-state.ps1
+- src/integration/assets/qodercli/herdr-agent-state.sh
+- src/integration/mod.rs
+- src/integration/tests.rs
+- tests/cli/hooks.rs
+- tests/cli/surface.rs
 
 Each modified commentable source or workflow file contains the Apache-2.0
 section 4(b) notice:

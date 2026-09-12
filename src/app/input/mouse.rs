@@ -76,6 +76,10 @@ impl AppState {
         terminal_runtimes: &TerminalRuntimeRegistry,
         mouse: MouseEvent,
     ) {
+        #[cfg(unix)]
+        if self.handle_trace_mouse(mouse) {
+            return;
+        }
         if self.mode != Mode::Terminal {
             return;
         }
@@ -106,6 +110,11 @@ impl AppState {
     ) -> Option<MouseAction> {
         if self.mode == Mode::Onboarding {
             self.handle_onboarding_mouse(mouse);
+            return None;
+        }
+
+        #[cfg(unix)]
+        if self.handle_trace_mouse(mouse) {
             return None;
         }
 

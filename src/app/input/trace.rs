@@ -12,7 +12,7 @@
 //! `focus_agent_entry` switches workspace and tab, so driving it from `j`/`k`
 //! would throw the main view around on every keystroke. Enter commits.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use herdr_agent_watcher::daemon::store::PaneTelemetry;
 use herdr_agent_watcher::sidebar::dialog::{Panel, Row};
 use herdr_agent_watcher::sidebar::format;
@@ -24,6 +24,10 @@ use crate::app::App;
 use crate::layout::PaneId;
 
 impl AppState {
+    fn agent_cards_visible(&self) -> bool {
+        !self.sidebar_collapsed && self.agents_view == crate::config::AgentsViewConfig::Cards
+    }
+
     /// The card traces navigate: the keyboard cursor while `Mode::Agents` is
     /// active, otherwise the focused pane's card, which is the only expanded
     /// one. `None` when it is collapsed or there is no agent card.
@@ -76,6 +80,10 @@ impl AppState {
     /// Enters the card zone, anchored on whichever card is already expanded so
     /// the mode starts where the eye is.
     pub(crate) fn enter_agents_mode(&mut self) {
+        self.exit_agents_mode();
+        if !self.agent_cards_visible() {
+            return;
+        }
         let entries = crate::ui::agent_panel_entries(self);
         if entries.is_empty() {
             return;
@@ -207,7 +215,7 @@ impl AppState {
     /// resolve this before the card-body hit: a trace row sits inside a card's
     /// span, so the more specific hit has to win.
     pub(super) fn trace_target_at(&self, col: u16, row: u16) -> Option<(PaneId, String)> {
-        if self.sidebar_collapsed || self.agents_view != crate::config::AgentsViewConfig::Cards {
+        if !self.agent_cards_visible() {
             return None;
         }
         let detail_area = self.agent_panel_rect();
@@ -257,7 +265,7 @@ impl AppState {
         let area = self.view.terminal_area;
         // Same refusal the other panels make: a panel too small to read would
         // still capture every key.
-        if crate::ui::trace_panel_width(area) == 0 || area.height < 4 {
+        if crate::ui::trace_panel_width(area) < 5 || area.height < 7 {
             return;
         }
         // Snapshot at open: a call falling off the ring must not rewrite text
@@ -274,6 +282,18 @@ impl AppState {
         };
         self.agent_trace_panel = Some(trace_panel(&call, now_unix_ms()));
         self.mode = Mode::Agents;
+    }
+
+    pub(super) fn handle_trace_mouse(&mut self, mouse: MouseEvent) -> bool {
+        if self.agent_trace_panel.is_none() {
+            return false;
+        }
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.scroll_trace_detail(-1),
+            MouseEventKind::ScrollDown => self.scroll_trace_detail(1),
+            _ => {}
+        }
+        true
     }
 
     fn scroll_trace_detail(&mut self, delta: isize) {
@@ -293,6 +313,10 @@ impl AppState {
     /// Drops a cursor or focus that no longer names a rendered row. Called
     /// every draw, so neither can point at something the user cannot see.
     pub(crate) fn reconcile_trace_focus(&mut self) {
+        if !self.agent_cards_visible() {
+            self.exit_agents_mode();
+            return;
+        }
         // A cursor whose card left the list (pane closed, `z` hid it) takes the
         // whole mode with it rather than silently retargeting.
         if let Some(cursor) = self.agent_card_cursor {
@@ -331,6 +355,7 @@ impl App {
             return;
         }
         if self.state.is_prefix_key(&key) {
+            self.state.exit_agents_mode();
             self.state.mode = Mode::Prefix;
             return;
         }
@@ -461,6 +486,124 @@ mod tests {
     use super::*;
 
     const NOW: u64 = 1_756_000_000_000;
+
+    fn state_with_agent() -> AppState {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![crate::workspace::Workspace::test_new("agent")];
+        state.active = Some(0);
+        state.ensure_test_terminals();
+        let terminal = state.terminals.values_mut().next().unwrap();
+        terminal.detected_agent = Some(crate::detect::Agent::Claude);
+        terminal.state = crate::detect::AgentState::Working;
+        state.sidebar_collapsed = false;
+        state.agents_view = crate::config::AgentsViewConfig::Cards;
+        state
+    }
+
+    #[test]
+    fn agents_entry_and_reconciliation_require_visible_cards() {
+        use crate::config::AgentsViewConfig::{Cards, Legacy};
+
+        for (collapsed, view) in [(true, Cards), (false, Legacy)] {
+            let mut state = state_with_agent();
+            assert!(!crate::ui::agent_panel_entries(&state).is_empty());
+            state.sidebar_collapsed = collapsed;
+            state.agents_view = view;
+            state.enter_agents_mode();
+            assert_ne!(state.mode, Mode::Agents);
+            assert!(state.agent_card_cursor.is_none());
+
+            state.sidebar_collapsed = false;
+            state.agents_view = Cards;
+            state.enter_agents_mode();
+            assert_eq!(state.mode, Mode::Agents);
+            state.agent_trace_panel = Some(trace_panel(&serde_json::json!({}), NOW));
+            state.sidebar_collapsed = collapsed;
+            state.agents_view = view;
+            state.reconcile_trace_focus();
+            assert_eq!(state.mode, Mode::Terminal);
+            assert!(state.agent_card_cursor.is_none());
+            assert!(state.agent_trace_panel.is_none());
+        }
+    }
+
+    #[test]
+    fn fresh_agents_entry_clears_the_old_detail_panel() {
+        let mut state = state_with_agent();
+        state.enter_agents_mode();
+        state.agent_trace_focus = state.agent_card_cursor.map(|pane| (pane, "old".into()));
+        state.agent_trace_panel = Some(trace_panel(&serde_json::json!({}), NOW));
+
+        state.enter_agents_mode();
+
+        assert_eq!(state.mode, Mode::Agents);
+        assert!(state.agent_card_cursor.is_some());
+        assert!(state.agent_trace_focus.is_none());
+        assert!(state.agent_trace_panel.is_none());
+    }
+
+    #[tokio::test]
+    async fn prefix_cancellation_clears_agent_navigation() {
+        let mut app = super::super::app_for_mouse_test();
+        app.state = state_with_agent();
+        app.state.enter_agents_mode();
+        app.state.agent_trace_focus = app.state.agent_card_cursor.map(|pane| (pane, "old".into()));
+        app.state.agent_trace_panel = Some(trace_panel(&serde_json::json!({}), NOW));
+
+        app.handle_trace_key(crate::input::TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ));
+        assert_eq!(app.state.mode, Mode::Prefix);
+        app.handle_key(crate::input::TerminalKey::new(
+            KeyCode::Esc,
+            crossterm::event::KeyModifiers::empty(),
+        ))
+        .await;
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.state.agent_card_cursor.is_none());
+        assert!(app.state.agent_trace_focus.is_none());
+        assert!(app.state.agent_trace_panel.is_none());
+    }
+
+    #[tokio::test]
+    async fn trace_detail_consumes_mouse_and_scrolls_its_body() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+
+        let mut app = super::super::app_for_mouse_test();
+        app.state = state_with_agent();
+        app.state.enter_agents_mode();
+        app.state.view.terminal_area = ratatui::layout::Rect::new(26, 0, 80, 20);
+        app.state.agent_trace_panel = Some(trace_panel(&serde_json::json!({"args": "tail"}), NOW));
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::Up(MouseButton::Right),
+        ] {
+            app.handle_mouse(super::super::mouse(kind, 60, 10));
+            assert_eq!(app.state.mode, Mode::Agents);
+            assert!(app.state.agent_trace_panel.is_some());
+            assert!(app.state.context_menu.is_none());
+        }
+        for (kind, expected_offset) in [
+            (MouseEventKind::ScrollDown, 1),
+            (MouseEventKind::ScrollUp, 0),
+            (MouseEventKind::ScrollUp, 0),
+        ] {
+            app.handle_mouse(super::super::mouse(kind, 60, 10));
+            assert_eq!(
+                app.state.agent_trace_panel.as_ref().unwrap().offset,
+                expected_offset
+            );
+        }
+        app.state.handle_pane_mouse_only(
+            &app.terminal_runtimes,
+            super::super::mouse(MouseEventKind::ScrollDown, 60, 10),
+        );
+        assert_eq!(app.state.agent_trace_panel.as_ref().unwrap().offset, 1);
+    }
 
     fn rows_text(panel: &Panel) -> Vec<String> {
         panel

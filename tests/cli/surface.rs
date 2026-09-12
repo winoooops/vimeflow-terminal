@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use super::harness::*;
 
 #[test]
@@ -393,35 +394,40 @@ fn agent_cli_rejects_invalid_wait_and_rename_grammar_locally() {
 }
 
 #[test]
-fn completion_command_prints_zsh_script_without_session_startup() {
-    let output = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
-        .args(["completion", "zsh"])
-        .env_remove("HERDR_SOCKET_PATH")
-        .env_remove("HERDR_CLIENT_SOCKET_PATH")
-        .env_remove("HERDR_ENV")
-        .output()
-        .unwrap();
+fn completion_command_registers_vimeflow_without_session_startup() {
+    for (shell, registration) in [
+        ("zsh", "#compdef vimeflow"),
+        ("bash", "complete -F _vimeflow"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
+            .args(["completion", shell])
+            .env_remove("HERDR_SOCKET_PATH")
+            .env_remove("HERDR_CLIENT_SOCKET_PATH")
+            .env_remove("HERDR_ENV")
+            .output()
+            .unwrap();
 
-    assert!(
-        output.status.success(),
-        "status={:?} stderr={}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("#compdef herdr"), "stdout: {stdout}");
-    assert!(
+        assert!(
+            output.status.success(),
+            "status={:?} stderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(registration), "stdout: {stdout}");
+        assert!(
         !stdout.contains("--cwd=[]"),
         "zsh completions should not suggest equals-style values unsupported by most manual parsers: {stdout}"
     );
-    assert!(
-        !stdout.contains("--direction=[]"),
-        "zsh completions should not suggest equals-style direction values: {stdout}"
-    );
-    assert!(
-        !stdout.contains("live-handoff"),
-        "internal server handoff command should not be completed: {stdout}"
-    );
+        assert!(
+            !stdout.contains("--direction=[]"),
+            "zsh completions should not suggest equals-style direction values: {stdout}"
+        );
+        assert!(
+            !stdout.contains("live-handoff"),
+            "internal server handoff command should not be completed: {stdout}"
+        );
+    }
 }
 
 #[test]

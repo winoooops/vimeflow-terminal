@@ -361,24 +361,24 @@ pub(super) fn render_trace_detail(app: &AppState, frame: &mut Frame, area: Rect)
         return;
     };
     let width = trace_panel_width(area);
-    if width == 0 || area.height < 4 {
+    // The watcher owns four border/footer rows; leave at least one body row
+    // inside the panel and one margin row above and below it.
+    if width < 5 || area.height < 7 {
         return;
     }
     let height = dialog::line_count(panel, width)
-        .saturating_add(2)
+        .saturating_add(4)
         .min(area.height.saturating_sub(2) as usize) as u16;
-    let x = area.x + area.width.saturating_sub(width + 2) / 2;
+    let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
-    let rect = Rect::new(x, y, width + 2, height);
+    let rect = Rect::new(x, y, width, height);
 
     let p = &app.palette;
-    let Some(inner) = render_panel_shell(frame, rect, p.accent, p.panel_bg) else {
-        return;
-    };
-    for (offset, line) in dialog::render(panel, inner.width, inner.height)
+    frame.render_widget(Clear, rect);
+    for (offset, line) in dialog::render(panel, rect.width, rect.height)
         .into_iter()
         .enumerate()
-        .take(inner.height as usize)
+        .take(rect.height as usize)
     {
         let spans = line.into_iter().map(|span| {
             Span::styled(
@@ -387,9 +387,61 @@ pub(super) fn render_trace_detail(app: &AppState, frame: &mut Frame, area: Rect)
             )
         });
         frame.render_widget(
-            Paragraph::new(Line::from_iter(spans)),
-            Rect::new(inner.x, inner.y + offset as u16, inner.width, 1),
+            Paragraph::new(Line::from_iter(spans)).style(Style::default().bg(p.panel_bg)),
+            Rect::new(rect.x, rect.y + offset as u16, rect.width, 1),
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn trace_detail_renders_short_body_and_scrolls_in_minimum_height() {
+    use herdr_agent_watcher::sidebar::dialog::{Panel, Row};
+
+    let mut app = AppState::test_new();
+    app.agent_trace_panel = Some(Panel {
+        title: "Trace — Bash".into(),
+        rows: vec![
+            Row::Entry {
+                label: "status".into(),
+                value: "done".into(),
+                enabled: false,
+            },
+            Row::Entry {
+                label: "when".into(),
+                value: "2026-09-01".into(),
+                enabled: false,
+            },
+            Row::Rule,
+            Row::Text("echo readable".into()),
+        ],
+        footer: "esc close".into(),
+        cursor: None,
+        offset: 0,
+    });
+    for (height, offset, expected) in [
+        (20, 0, vec!["status", "2026-09-01", "echo readable"]),
+        (7, 0, vec!["status"]),
+        (7, 3, vec!["echo readable"]),
+        (6, 0, vec![]),
+    ] {
+        app.agent_trace_panel.as_mut().unwrap().offset = offset;
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, height)).unwrap();
+        terminal
+            .draw(|frame| render_trace_detail(&app, frame, frame.area()))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        for expected in expected {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert_eq!(text.contains("Trace"), height >= 7);
     }
 }
 
