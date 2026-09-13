@@ -421,7 +421,12 @@ mod tests {
     fn pane_title_survives_titleless_telemetry_and_yields_to_a_telemetry_title() {
         let mut telemetry = telemetry();
         telemetry.cwd = None;
-        for title in [None, Some(serde_json::json!({"title": null}))] {
+        for title in [
+            None,
+            Some(serde_json::json!({})),
+            Some(serde_json::json!({"title": null})),
+            Some(serde_json::json!({"title": 42})),
+        ] {
             telemetry.title = title.clone();
             for expanded in [false, true] {
                 let rendered = plain(&card(Some(&telemetry), None, expanded, 40));
@@ -434,6 +439,13 @@ mod tests {
         let rendered = plain(&card(Some(&telemetry), None, false, 40));
         assert!(rendered.iter().any(|line| line.contains("watcher task")));
         assert!(!rendered.iter().any(|line| line.contains("ship cards")));
+
+        // An explicit clear must not bring back a stale pane title.
+        telemetry.title = Some(serde_json::json!({"title": ""}));
+        for expanded in [false, true] {
+            let rendered = plain(&card(Some(&telemetry), None, expanded, 40));
+            assert!(!rendered.iter().any(|line| line.contains("ship cards")));
+        }
     }
 
     #[test]

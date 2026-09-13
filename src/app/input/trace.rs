@@ -359,9 +359,6 @@ impl AppState {
             self.exit_agents_mode();
             return;
         }
-        // Live calls and resized panels can leave a valid selection's card
-        // too tall to fit below the retained scroll position.
-        self.anchor_card_to_top(pane);
         let ids = self.trace_selectable_ids(pane);
         if ids.contains(&id) {
             return;
@@ -631,6 +628,72 @@ mod tests {
                 }),
                 "selected trace should remain visible with {calls} calls at height {height}"
             );
+        }
+    }
+
+    #[test]
+    fn card_cursor_stays_visible_without_a_selected_trace() {
+        let mut state = state_with_agent();
+        state.workspaces.extend(
+            ["middle", "tail"]
+                .into_iter()
+                .map(crate::workspace::Workspace::test_new),
+        );
+        state.ensure_test_terminals();
+        for terminal in state.terminals.values_mut() {
+            terminal.detected_agent = Some(crate::detect::Agent::Claude);
+            terminal.state = crate::detect::AgentState::Working;
+        }
+        let workspace = &state.workspaces[2];
+        let pane = workspace.tabs[0].root_pane;
+        let public_id = crate::workspace::public_pane_id_for_number(
+            &workspace.id,
+            workspace.public_pane_number(pane).unwrap(),
+        );
+        state
+            .agent_telemetry
+            .insert(public_id.clone(), PaneTelemetry::with_agent("claude"));
+        crate::ui::compute_view(&mut state, Rect::new(0, 0, 100, 24));
+        state.enter_agents_mode();
+        state.move_card_cursor(2);
+
+        for (calls, height) in [
+            (0, 24),
+            (0, 46),
+            (2, 46),
+            (2, 24),
+            (2, 40),
+            (2, 24),
+            (2, 16),
+        ] {
+            state
+                .agent_telemetry
+                .get_mut(&public_id)
+                .unwrap()
+                .tool_calls = (0..calls)
+                .map(|i| {
+                    serde_json::json!({
+                        "toolUseId": format!("id{i}"), "tool": "Edit",
+                        "args": "x", "status": "done"
+                    })
+                })
+                .collect();
+            crate::ui::compute_view(&mut state, Rect::new(0, 0, 100, height));
+            let body = crate::ui::agent_panel_items_rect(&state, state.agent_panel_rect(), false);
+            assert!(
+                (body.y..body.y + body.height).any(|row| {
+                    state
+                        .agent_detail_target_at(body.x, row)
+                        .is_some_and(|(_, _, target, _)| target == pane)
+                }),
+                "card cursor should remain visible with {calls} calls at height {height}"
+            );
+            if calls == 0 {
+                assert_eq!(state.agent_panel_scroll, 0);
+            }
+            assert_eq!(state.agent_card_cursor, Some(pane));
+            assert!(state.agent_trace_focus.is_none());
+            assert_eq!(state.active, Some(0));
         }
     }
 

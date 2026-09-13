@@ -211,14 +211,14 @@ the top of the file:
 | `src/config/model.rs` | Add startup-only native watcher and title-sync sections plus live tab-island configuration, notification policy, panel keybinding, and island-anchored toast defaults. | `c3c70979`, dynamic island capsule (this commit), island motion (this commit), island active title (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), emoji island bell (this commit), island toast placement (this commit) |
 | `src/config/keybinds.rs` | Parse, validate, and expose the rebindable island-panel toggle action. | island notification panel (this commit) |
 | `src/logging.rs` | Point the default tracing filter at the renamed crate root; a bin rename moves every target, and a stale directive silently disables all file logging. | vimeflow rename (this commit) |
-| `src/config/io.rs` | Recognize native feature sections and diagnose legacy Agents-row settings and invalid compact-rail and island bell mark overrides from raw startup/live TOML; own the fork's app directory names and the one-time seed from an installed herdr. | `c3c70979`, `b8a6406c`, compact-rail agent marks (this commit), island notification bell (this commit), vimeflow rename (this commit) |
+| `src/config/io.rs` | Recognize native feature sections and diagnose legacy Agents-row settings and invalid compact-rail and island bell mark overrides from raw startup/live TOML; own the fork's isolated app directory names. | `c3c70979`, `b8a6406c`, compact-rail agent marks (this commit), island notification bell (this commit), vimeflow rename (this commit) |
 | `src/config.rs` | Export the fork's Agents-card view, compact-rail leading, and tab-island configuration types. | `b8a6406c`, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit), island notification arrivals (this commit) |
 | `src/config/sidebar.rs` | Add live Agents-card, idle-filter, and compact-rail number and agent-mark settings beside legacy row configuration. | `b8a6406c`, compact-rail numbers, compact-rail agent marks (this commit) |
 | `src/server/headless.rs` | Own the embedded watcher, telemetry ingestion, and title-sync lifecycles across normal and handoff server paths, reconcile shared island-panel and Agents navigation state from foreground-client geometry, own foreground input-source switching, keep island arrivals out of stock notification delivery, reject retained PTY patching under the panel, warn about enabled standalone twins, and keep test construction cfg-clean on Windows. | `dd08df50`, `e006a1ea`, `b3aff323`, `95a7db2a`, PR #6, island motion (this commit), island notification arrivals (this commit), island panel geometry reconciliation (this commit), island notification review fixes (this commit), island notification single-client follow-up (this commit) |
 | `src/cli/spec.rs` | Describe the native watcher command group and its supported subcommands, and name the program `vimeflow` in generated usage. | `dded4c73`, vimeflow rename (this commit) |
 | `src/main.rs` | Register the Unix-only native title-sync and Agent-card modules. | `f4af78b5`, `95a7db2a` |
 | `src/events.rs` | Return blocking title-reader results to the server thread for identity-checked application. | `e006a1ea` |
-| `src/ui.rs` | Export shared Agent-card geometry to sidebar input handling and compute tab-island row, panel, hit geometry, and notification-driven one-tab visibility, with shared desktop toast render and hit geometry. | `158aabf9`, dynamic island capsule (this commit), island motion (this commit), island notification arrivals (this commit), island notification panel (this commit), island notification review fixes (this commit), island panel geometry reconciliation (this commit), island notification marvin fixes (this commit), island toast placement (this commit) |
+| `src/ui.rs` | Export shared Agent-card geometry to sidebar input handling, keep selected cards visible after geometry or telemetry changes, and compute tab-island row, panel, hit geometry, and notification-driven one-tab visibility, with shared desktop toast render and hit geometry. | `158aabf9`, dynamic island capsule (this commit), island motion (this commit), island notification arrivals (this commit), island notification panel (this commit), island notification review fixes (this commit), island panel geometry reconciliation (this commit), island notification marvin fixes (this commit), island toast placement (this commit), PR #17 final review |
 | `src/ui/keybind_help.rs` | Show the island notification panel action in keybinding help. | island notification panel (this commit) |
 | `src/ui/tab_surface.rs` | Characterize the island-default full-app frame while retaining the classic frame baseline. | dynamic island capsule (this commit), stable island capsule (this commit) |
 | `src/ui/tabs.rs` | Dispatch tab-bar rendering and geometry between the classic bar and the fork-added island, including capsule and interaction hit areas. | dynamic island capsule (this commit), island active title (this commit), stable island capsule (this commit), island notification panel (this commit) |
@@ -307,11 +307,7 @@ For each upstream release:
   `session::local_attach_command` / `stop_command_for` builders, and the "run
   `…`" hints in error messages.
 
-`config::io::migrate_from_upstream_once()` seeds the fork's directories from an
-installed herdr on the first interactive launch, copying rather than moving. It
-runs only on that path — every subcommand, the headless server and the thin
-client also reach `main()`, and copying a plugin tree on each would be both
-wasteful and a surprising write to the user's state directory.
+Vimeflow starts with a clean configuration in its own directory.
 
 Two consequences worth remembering, both found by tests rather than review:
 

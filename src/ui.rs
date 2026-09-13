@@ -268,6 +268,21 @@ fn compute_view_internal(
         let (_, detail_area) = expanded_sidebar_sections(sidebar_area, app.sidebar_section_split);
         let max_agent_scroll = agent_panel_scroll_metrics(app, detail_area).max_offset_from_bottom;
         app.agent_panel_scroll = app.agent_panel_scroll.min(max_agent_scroll);
+        #[cfg(unix)]
+        if let Some(target) = app
+            .agent_card_cursor
+            .or_else(|| app.agent_trace_focus.as_ref().map(|(pane, _)| *pane))
+            .and_then(|pane| {
+                agent_panel_entries(app)
+                    .iter()
+                    .position(|entry| entry.pane_id == pane)
+            })
+        {
+            // Reconcile against the new geometry and live card heights, even
+            // while navigating cards without a selected trace.
+            app.agent_panel_scroll =
+                agent_panel_scroll_for_target(app, detail_area, app.agent_panel_scroll, target);
+        }
     } else {
         app.workspace_scroll = app
             .workspace_scroll
