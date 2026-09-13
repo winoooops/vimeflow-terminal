@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{
@@ -85,9 +86,9 @@ fn agent_explain(args: &[String]) -> std::io::Result<i32> {
                 index += 1;
             }
             "help" | "--help" | "-h" => {
-                eprintln!("usage: herdr agent explain <target> [--json|--verbose]");
+                eprintln!("usage: vimeflow agent explain <target> [--json|--verbose]");
                 eprintln!(
-                    "usage: herdr agent explain --file PATH --agent LABEL [--json|--verbose]"
+                    "usage: vimeflow agent explain --file PATH --agent LABEL [--json|--verbose]"
                 );
                 return Ok(0);
             }
@@ -97,7 +98,7 @@ fn agent_explain(args: &[String]) -> std::io::Result<i32> {
             }
             value => {
                 if target.is_some() {
-                    eprintln!("usage: herdr agent explain <target> [--json]");
+                    eprintln!("usage: vimeflow agent explain <target> [--json]");
                     return Ok(2);
                 }
                 target = Some(value.to_string());
@@ -108,7 +109,7 @@ fn agent_explain(args: &[String]) -> std::io::Result<i32> {
 
     let explain = if let Some(path) = file {
         if target.is_some() {
-            eprintln!("usage: herdr agent explain --file PATH --agent LABEL [--json]");
+            eprintln!("usage: vimeflow agent explain --file PATH --agent LABEL [--json]");
             return Ok(2);
         }
         let Some(agent_label) = agent else {
@@ -122,8 +123,8 @@ fn agent_explain(args: &[String]) -> std::io::Result<i32> {
         ))
     } else {
         let Some(target) = target else {
-            eprintln!("usage: herdr agent explain <target> [--json]");
-            eprintln!("usage: herdr agent explain --file PATH --agent LABEL [--json]");
+            eprintln!("usage: vimeflow agent explain <target> [--json]");
+            eprintln!("usage: vimeflow agent explain --file PATH --agent LABEL [--json]");
             return Ok(2);
         };
         if agent.is_some() {
@@ -271,7 +272,7 @@ fn matched_rule_region_preview<'a>(
 
 fn agent_start(args: &[String]) -> std::io::Result<i32> {
     let Some(name) = args.first() else {
-        eprintln!("usage: herdr agent start <name> --kind KIND --pane ID [--timeout MS] [-- <agent-args...>]");
+        eprintln!("usage: vimeflow agent start <name> --kind KIND --pane ID [--timeout MS] [-- <agent-args...>]");
         return Ok(2);
     };
     let separator = args
@@ -376,7 +377,7 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
 
 fn agent_list(args: &[String]) -> std::io::Result<i32> {
     if !args.is_empty() {
-        eprintln!("usage: herdr agent list");
+        eprintln!("usage: vimeflow agent list");
         return Ok(2);
     }
 
@@ -388,11 +389,11 @@ fn agent_list(args: &[String]) -> std::io::Result<i32> {
 
 fn agent_get(args: &[String]) -> std::io::Result<i32> {
     let Some(target) = args.first() else {
-        eprintln!("usage: herdr agent get <target>");
+        eprintln!("usage: vimeflow agent get <target>");
         return Ok(2);
     };
     if args.len() != 1 {
-        eprintln!("usage: herdr agent get <target>");
+        eprintln!("usage: vimeflow agent get <target>");
         return Ok(2);
     }
 
@@ -406,11 +407,11 @@ fn agent_get(args: &[String]) -> std::io::Result<i32> {
 
 fn agent_focus(args: &[String]) -> std::io::Result<i32> {
     let Some(target) = args.first() else {
-        eprintln!("usage: herdr agent focus <target>");
+        eprintln!("usage: vimeflow agent focus <target>");
         return Ok(2);
     };
     if args.len() != 1 {
-        eprintln!("usage: herdr agent focus <target>");
+        eprintln!("usage: vimeflow agent focus <target>");
         return Ok(2);
     }
 
@@ -423,11 +424,13 @@ fn agent_focus(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn agent_attach(args: &[String]) -> std::io::Result<i32> {
-    let (target, takeover) =
-        match super::parse_attach_target(args, "usage: herdr agent attach <target> [--takeover]") {
-            Ok(parsed) => parsed,
-            Err(code) => return Ok(code),
-        };
+    let (target, takeover) = match super::parse_attach_target(
+        args,
+        "usage: vimeflow agent attach <target> [--takeover]",
+    ) {
+        Ok(parsed) => parsed,
+        Err(code) => return Ok(code),
+    };
 
     let response = resolve_agent_target(&target, "cli:agent:attach:resolve")?;
     if response.get("error").is_some() {
@@ -444,7 +447,7 @@ fn agent_attach(args: &[String]) -> std::io::Result<i32> {
 
 fn agent_wait(args: &[String]) -> std::io::Result<i32> {
     let Some(target) = args.first() else {
-        eprintln!("usage: herdr agent wait <target> [--until STATUS]... [--timeout MS]");
+        eprintln!("usage: vimeflow agent wait <target> [--until STATUS]... [--timeout MS]");
         return Ok(2);
     };
     let mut until = Vec::new();
@@ -479,7 +482,7 @@ fn agent_wait(args: &[String]) -> std::io::Result<i32> {
                 index += 2;
             }
             "help" | "--help" | "-h" => {
-                eprintln!("usage: herdr agent wait <target> [--until STATUS]... [--timeout MS]");
+                eprintln!("usage: vimeflow agent wait <target> [--until STATUS]... [--timeout MS]");
                 return Ok(0);
             }
             other => {
@@ -624,7 +627,7 @@ fn agent_get_request(target: &str, request_id: &str) -> Request {
 
 fn agent_rename(args: &[String]) -> std::io::Result<i32> {
     let [target, value] = args else {
-        eprintln!("usage: herdr agent rename <target> <name>|--clear");
+        eprintln!("usage: vimeflow agent rename <target> <name>|--clear");
         return Ok(2);
     };
     let name = if value == "--clear" {
@@ -645,7 +648,7 @@ fn agent_rename(args: &[String]) -> std::io::Result<i32> {
 fn agent_prompt(args: &[String]) -> std::io::Result<i32> {
     let Some(target) = args.first() else {
         eprintln!(
-            "usage: herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]"
+            "usage: vimeflow agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]"
         );
         return Ok(2);
     };
@@ -716,7 +719,7 @@ fn agent_prompt(args: &[String]) -> std::io::Result<i32> {
 
 fn agent_send_keys(args: &[String]) -> std::io::Result<i32> {
     if args.len() < 2 {
-        eprintln!("usage: herdr agent send-keys <target> <key> [key ...]");
+        eprintln!("usage: vimeflow agent send-keys <target> <key> [key ...]");
         return Ok(2);
     }
 
@@ -731,7 +734,7 @@ fn agent_send_keys(args: &[String]) -> std::io::Result<i32> {
 
 fn agent_read(args: &[String]) -> std::io::Result<i32> {
     let Some(target) = args.first() else {
-        eprintln!("usage: herdr agent read <target> [--source visible|recent|recent-unwrapped] [--lines N] [--format text|ansi] [--ansi]");
+        eprintln!("usage: vimeflow agent read <target> [--source visible|recent|recent-unwrapped] [--lines N] [--format text|ansi] [--ansi]");
         return Ok(2);
     };
 

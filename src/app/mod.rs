@@ -678,6 +678,10 @@ impl App {
                 &config.ui.sidebar.compact_rail_marks,
             ),
             agent_card_collapsed_for: None,
+            agent_card_cursor: None,
+            agent_trace_focus: None,
+            #[cfg(unix)]
+            agent_trace_panel: None,
             #[cfg(unix)]
             agent_telemetry: std::collections::HashMap::new(),
             agent_view_override: None,
@@ -953,7 +957,9 @@ impl App {
     }
 
     /// Reconcile shared panel state only after computing the foreground client's geometry.
-    pub(crate) fn reconcile_island_panel_from_foreground_view(&mut self) {
+    pub(crate) fn reconcile_panels_from_foreground_view(&mut self) {
+        #[cfg(unix)]
+        self.state.reconcile_trace_visibility();
         if self.state.island_panel_open
             && (self.state.view.island_panel_hit_area.width == 0
                 || self.state.view.island_panel_hit_area.height == 0)
@@ -1153,7 +1159,7 @@ impl App {
                             area,
                         );
                     }
-                    self.reconcile_island_panel_from_foreground_view();
+                    self.reconcile_panels_from_foreground_view();
                     crate::ui::render_with_runtime_registry(
                         &self.state,
                         &self.terminal_runtimes,
@@ -1913,6 +1919,9 @@ impl App {
             Mode::Copy => {
                 self.handle_copy_mode_key(key);
             }
+            Mode::Agents => {
+                self.handle_trace_key(key);
+            }
             Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane => {
                 self.handle_rename_key_via_api(key_event);
             }
@@ -2130,7 +2139,7 @@ mod tests {
             .expect("test island record id");
         app.state.set_island_panel_open(true);
         crate::ui::compute_view_with_runtime_registry(&mut app.state, &app.terminal_runtimes, area);
-        app.reconcile_island_panel_from_foreground_view();
+        app.reconcile_panels_from_foreground_view();
         assert!(app.state.island_panel_open);
         assert!(app.state.view.island_panel_hit_area.width > 0);
         assert_eq!(drained_prefix_active(app), vec![true]);
@@ -2260,7 +2269,7 @@ mod tests {
             &app.terminal_runtimes,
             Rect::new(0, 0, 44, 20),
         );
-        app.reconcile_island_panel_from_foreground_view();
+        app.reconcile_panels_from_foreground_view();
 
         assert_eq!(app.state.view.layout, state::ViewLayout::Mobile);
         assert!(!app.state.island_panel_open);
@@ -2278,7 +2287,7 @@ mod tests {
             &app.terminal_runtimes,
             Rect::new(0, 0, 100, 3),
         );
-        app.reconcile_island_panel_from_foreground_view();
+        app.reconcile_panels_from_foreground_view();
 
         assert_eq!(app.state.view.layout, state::ViewLayout::Desktop);
         assert!(!app.state.island_panel_open);
@@ -2295,6 +2304,7 @@ mod tests {
             Mode::Navigator,
             Mode::Copy,
             Mode::Resize,
+            Mode::Agents,
             Mode::ConfirmClose,
             Mode::ConfirmRemoveWorktree,
             Mode::ContextMenu,

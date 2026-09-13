@@ -22,11 +22,17 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "worktrees",
 ];
 
+/// The fork's own directory, deliberately distinct from upstream herdr's.
+///
+/// Nothing is inherited from an installed herdr: vimeflow starts from a clean
+/// config. The two can run at the same time because a server exports its *own*
+/// socket path to the panes it spawns, so each side's children resolve back to
+/// the side that started them.
 pub fn app_dir_name() -> &'static str {
     if cfg!(debug_assertions) {
-        "herdr-dev"
+        "vimeflow-dev"
     } else {
-        "herdr"
+        "vimeflow"
     }
 }
 

@@ -386,6 +386,8 @@ pub struct KeysConfig {
     pub open_notification_target: BindingConfig,
     /// Toggle the island notification panel. Default: "prefix+i".
     pub island_panel_toggle: BindingConfig,
+    /// Move keyboard focus into the agents sidebar. Default: "prefix+a".
+    pub focus_agents: BindingConfig,
     /// Select the previous workspace. Unset by default.
     pub previous_workspace: BindingConfig,
     /// Select the next workspace. Unset by default.
@@ -508,6 +510,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     island_panel_toggle: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    focus_agents: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     previous_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_workspace: Option<BindingConfig>,
@@ -617,6 +621,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(reload_config);
         apply_field!(open_notification_target);
         apply_field!(island_panel_toggle);
+        apply_field!(focus_agents);
         apply_field!(previous_workspace);
         apply_field!(next_workspace);
         apply_field!(previous_agent);
@@ -716,6 +721,7 @@ impl KeysConfig {
         copy_effective_action_field!(reload_config, keybinds.reload_config);
         copy_effective_action_field!(open_notification_target, keybinds.open_notification_target);
         copy_effective_action_field!(island_panel_toggle, keybinds.island_panel_toggle);
+        copy_effective_action_field!(focus_agents, keybinds.focus_agents);
         copy_effective_action_field!(previous_workspace, keybinds.previous_workspace);
         copy_effective_action_field!(next_workspace, keybinds.next_workspace);
         copy_effective_action_field!(previous_agent, keybinds.previous_agent);
@@ -1088,6 +1094,7 @@ impl Default for KeysConfig {
             reload_config: BindingConfig::one("prefix+shift+r"),
             open_notification_target: BindingConfig::one("prefix+o"),
             island_panel_toggle: BindingConfig::one("prefix+i"),
+            focus_agents: BindingConfig::one("prefix+a"),
             previous_workspace: BindingConfig::empty(),
             next_workspace: BindingConfig::empty(),
             previous_agent: BindingConfig::empty(),

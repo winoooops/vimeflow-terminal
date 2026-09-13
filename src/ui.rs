@@ -31,9 +31,13 @@ use self::dialogs::{
 pub(crate) use self::island::island_animation_for_tab_change;
 use self::island::{compute_island_panel_view, render_island_panel};
 use self::keybind_help::render_keybind_help_overlay;
+#[cfg(unix)]
+use self::menus::render_trace_detail;
+#[cfg(unix)]
+pub(crate) use self::menus::trace_panel_width;
 use self::menus::{
     render_context_menu, render_copy_mode_overlay, render_global_launcher_menu,
-    render_navigate_overlay, render_prefix_overlay, render_resize_overlay,
+    render_navigate_overlay, render_prefix_overlay, render_resize_overlay, render_trace_overlay,
 };
 use self::mobile::{
     compute_mobile_header_hit_areas, is_mobile_width, mobile_switcher_max_scroll_for_height,
@@ -56,6 +60,8 @@ pub(crate) use self::scrollbar::{
     scrollbar_offset_from_row, scrollbar_thumb_grab_offset, should_show_scrollbar,
 };
 use self::settings::render_settings_overlay;
+#[cfg(unix)]
+pub(crate) use self::sidebar::agent_card_trace_spans;
 #[cfg(test)]
 pub(crate) use self::sidebar::agent_panel_body_rect;
 #[cfg(test)]
@@ -228,6 +234,11 @@ fn compute_view_internal(
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
+    // Geometry pass owns the mutation, so a focus that no longer names a
+    // rendered trace row can never reach render.
+    #[cfg(unix)]
+    app.reconcile_trace_focus();
+
     if is_mobile_width(area, app.mobile_width_threshold) {
         compute_mobile_view(app, terminal_runtimes, area, resize_panes, cell_size);
         return;
@@ -257,6 +268,21 @@ fn compute_view_internal(
         let (_, detail_area) = expanded_sidebar_sections(sidebar_area, app.sidebar_section_split);
         let max_agent_scroll = agent_panel_scroll_metrics(app, detail_area).max_offset_from_bottom;
         app.agent_panel_scroll = app.agent_panel_scroll.min(max_agent_scroll);
+        #[cfg(unix)]
+        if let Some(target) = app
+            .agent_card_cursor
+            .or_else(|| app.agent_trace_focus.as_ref().map(|(pane, _)| *pane))
+            .and_then(|pane| {
+                agent_panel_entries(app)
+                    .iter()
+                    .position(|entry| entry.pane_id == pane)
+            })
+        {
+            // Reconcile against the new geometry and live card heights, even
+            // while navigating cards without a selected trace.
+            app.agent_panel_scroll =
+                agent_panel_scroll_for_target(app, detail_area, app.agent_panel_scroll, target);
+        }
     } else {
         app.workspace_scroll = app
             .workspace_scroll
@@ -447,6 +473,11 @@ pub fn render_with_runtime_registry(
         Mode::Navigate => render_navigate_overlay(app, frame, mode_bar_area),
         Mode::Prefix => render_prefix_overlay(app, frame, mode_bar_area),
         Mode::Copy => render_copy_mode_overlay(app, frame, mode_bar_area),
+        Mode::Agents => {
+            render_trace_overlay(app, frame, mode_bar_area);
+            #[cfg(unix)]
+            render_trace_detail(app, frame, terminal_area);
+        }
         Mode::Resize => render_resize_overlay(app, frame, mode_bar_area),
         Mode::ConfirmClose => {
             render_confirm_close_overlay(app, terminal_runtimes, frame, terminal_area)

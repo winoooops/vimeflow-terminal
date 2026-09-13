@@ -609,8 +609,20 @@ fn build_agent_card(
         .pane_label
         .as_deref()
         .or(entry.terminal_title_stripped.as_deref());
-    let expanded = app.is_active_pane(entry.ws_idx, entry.tab_idx, entry.pane_id)
-        && app.agent_card_collapsed_for != Some(entry.pane_id);
+    // While the keyboard cursor is up it decides expansion, so walking the list
+    // expands under the cursor without the main view following along.
+    let expanded = match app.agent_card_cursor {
+        Some(cursor) => cursor == entry.pane_id,
+        None => {
+            app.is_active_pane(entry.ws_idx, entry.tab_idx, entry.pane_id)
+                && app.agent_card_collapsed_for != Some(entry.pane_id)
+        }
+    };
+    let trace_focus = app
+        .agent_trace_focus
+        .as_ref()
+        .filter(|(pane, _)| *pane == entry.pane_id)
+        .map(|(_, id)| id.as_str());
     crate::agent_cards::view::build_card(
         crate::agent_cards::view::CardInput {
             workspace: &entry.primary_label,
@@ -619,11 +631,33 @@ fn build_agent_card(
             state: entry.state,
             seen: entry.seen,
             telemetry,
+            trace_focus,
         },
         body_width,
         body_height,
         expanded,
     )
+}
+
+/// `(pane id, toolUseId, card-local span)` for the card's selectable trace
+/// rows, shaped for the watcher's `layout::trace_at`. Display-only rows export
+/// nothing, so a hit-test can never land on one.
+#[cfg(unix)]
+pub(crate) fn agent_card_trace_spans(
+    app: &AppState,
+    entry: &AgentPanelEntry,
+    body_width: u16,
+    body_height: u16,
+) -> Vec<(
+    String,
+    String,
+    herdr_agent_watcher::sidebar::layout::LineSpan,
+)> {
+    build_agent_card(app, entry, body_width, body_height)
+        .trace_spans
+        .into_iter()
+        .map(|(id, span)| (entry.pane_id.raw().to_string(), id, span))
+        .collect()
 }
 
 pub(crate) fn agent_entry_height_in_body(
@@ -1752,7 +1786,14 @@ fn render_agent_cards(
         if row_y.saturating_add(height) > body_bottom {
             break;
         }
-        let active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
+        // The keyboard cursor takes the highlight while it is up, for the same
+        // reason it takes expansion: it does not move pane focus, so without
+        // this the highlight would sit on the focused pane while j/k walked
+        // somewhere else entirely.
+        let active = match app.agent_card_cursor {
+            Some(cursor) => cursor == detail.pane_id,
+            None => app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id),
+        };
         let row_style = if active {
             Style::default().bg(app.palette.surface_dim)
         } else {
@@ -1912,6 +1953,112 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn descending_into_the_last_card_still_renders_it() {
+        // A card near the bottom grows from three lines to its whole ring on
+        // descend, and the panel draws a card only when it fits in the rows
+        // still left below it — so it used to vanish exactly as the reader
+        // descended into it.
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = (0..6)
+            .map(|i| Workspace::test_new(&format!("ws{i}")))
+            .collect();
+        app.ensure_test_terminals();
+        for ws_idx in 0..app.workspaces.len() {
+            let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            terminal.state = AgentState::Working;
+        }
+        app.agents_view = crate::config::AgentsViewConfig::Cards;
+        app.active = Some(0);
+
+        let area = Rect::new(0, 0, 36, 40);
+        app.view.sidebar_rect = area;
+        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let body = agent_panel_items_rect(&app, agent_area, false);
+
+        let entries = agent_panel_entries(&app);
+        let last = entries.len() - 1;
+        let last_pane = entries[last].pane_id;
+
+        // Descend into the bottom card, the way `l` does.
+        app.agent_card_cursor = Some(last_pane);
+        app.select_trace_for_test(last_pane, "id0");
+
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let rendered: Vec<String> = (0..body.height)
+            .map(|row| row_text(buffer, body.y + row, body.width))
+            .collect();
+        assert!(
+            rendered.iter().any(|line| line.contains("CLAUDE")),
+            "the anchor card must be drawn, got {rendered:?}"
+        );
+        assert_eq!(
+            app.agent_panel_scroll, last,
+            "the anchor should start the list so it gets the full panel height"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keyboard_cursor_takes_the_highlight_from_the_focused_pane() {
+        // The cursor deliberately does not move pane focus, so a highlight tied
+        // to focus would sit still while j/k walked somewhere else.
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        for ws_idx in [0, 1] {
+            let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            terminal.state = AgentState::Working;
+        }
+        app.agents_view = crate::config::AgentsViewConfig::Cards;
+        app.active = Some(0);
+
+        let area = Rect::new(0, 0, 36, 30);
+        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let body = agent_panel_items_rect(&app, agent_area, false);
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 2);
+        let first_height = agent_entry_height_in_body(&app, &entries[0], body.width, body.height);
+        let second_row = body.y + first_height + agent_entry_gap(&app, 0, entries.len());
+
+        let highlight_bg = |app: &crate::app::state::AppState, row: u16| {
+            let mut terminal = Terminal::new(TestBackend::new(36, 30)).unwrap();
+            terminal
+                .draw(|frame| render_sidebar(app, &TerminalRuntimeRegistry::new(), frame, area))
+                .unwrap();
+            terminal.backend().buffer()[(body.x, row)].style().bg
+        };
+
+        // Focus alone highlights the first card.
+        assert_eq!(highlight_bg(&app, body.y), Some(app.palette.surface_dim));
+
+        // Cursor on the second card moves the highlight there, without the
+        // focused pane having changed.
+        app.agent_card_cursor = Some(entries[1].pane_id);
+        assert_eq!(
+            highlight_bg(&app, second_row),
+            Some(app.palette.surface_dim)
+        );
+        assert_ne!(highlight_bg(&app, body.y), Some(app.palette.surface_dim));
+        assert_eq!(app.active, Some(0), "cursor must not move pane focus");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn cards_render_lifecycle_only_with_hidden_count_outside_entries() {
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = vec![
@@ -1950,9 +2097,22 @@ mod tests {
             .unwrap();
         let buffer = terminal.backend().buffer();
 
-        assert!(row_text(buffer, body.y, body.width).contains("working"));
+        // Card content is the watcher's now, so assert on what herdr still
+        // owns: which agents are listed, their lifecycle glyph, and the
+        // workspace identity herdr injects through `cwd_label`. The state
+        // *word* only renders at card widths >= 40, which the sidebar never
+        // reaches, so the glyph is the lifecycle signal here.
+        let working = row_text(buffer, body.y, body.width);
+        assert!(working.contains('◐'), "running glyph missing: {working:?}");
         assert!(row_text(buffer, body.y + 1, body.width).contains("working"));
-        assert!(row_text(buffer, body.y + 2, body.width).contains("no telemetry"));
+
+        let blocked = row_text(buffer, body.y + 3, body.width);
+        assert!(
+            blocked.contains('!'),
+            "attention glyph missing: {blocked:?}"
+        );
+        assert!(row_text(buffer, body.y + 4, body.width).contains("blocked"));
+
         assert!(row_text(buffer, body.y + body.height, body.width).contains("+1 idle hidden"));
         assert_eq!(agent_panel_entries(&app).len(), 2);
     }

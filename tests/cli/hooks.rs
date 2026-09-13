@@ -1,4 +1,36 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use super::harness::*;
+
+#[test]
+fn qodercli_hook_uses_vimeflow_and_preserves_session_routing() {
+    let base = unique_test_dir();
+    fs::create_dir_all(&base).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_vimeflow"), base.join("vimeflow")).unwrap();
+    // An upstream executable earlier on PATH must never receive the report.
+    let upstream = base.join("herdr");
+    fs::write(&upstream, "#!/bin/sh\ntouch \"$0.called\"\nexit 1\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&upstream, fs::Permissions::from_mode(0o755)).unwrap();
+    let paths = std::env::var_os("PATH").unwrap_or_default();
+    let path =
+        std::env::join_paths(std::iter::once(base.clone()).chain(std::env::split_paths(&paths)))
+            .unwrap();
+
+    let request = run_shell_hook_with_env(
+        "src/integration/assets/qodercli/herdr-agent-state.sh",
+        &["session"],
+        r#"{"session_id":"qoder-session"}"#,
+        &[("PATH", path.to_str().unwrap())],
+    )
+    .expect("the fork binary should send the session report");
+
+    assert_eq!(request["method"], "pane.report_agent_session");
+    assert_eq!(request["params"]["pane_id"], "p_test");
+    assert_eq!(request["params"]["agent_session_id"], "qoder-session");
+    assert_eq!(request["params"]["source"], "herdr:qodercli");
+    assert!(!base.join("herdr.called").exists());
+    cleanup_test_base(&base);
+}
 
 fn run_claude_hook(action: &str, hook_input: &str) -> Option<serde_json::Value> {
     run_shell_hook(
@@ -61,6 +93,16 @@ fn run_shell_hook_with_env(
                     let mut line = String::new();
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
                     reader.read_line(&mut line).unwrap();
+                    let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    if request["method"] == "ping" {
+                        write_fake_pong(
+                            &mut stream,
+                            &request,
+                            "different-build-same-protocol",
+                            CURRENT_PROTOCOL,
+                        );
+                        continue;
+                    }
                     let _ = stream.write_all(br#"{"id":"test","result":{"type":"ok"}}"#);
                     let _ = stream.write_all(b"\n");
                     let _ = stream.flush();

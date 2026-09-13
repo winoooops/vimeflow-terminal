@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use super::harness::*;
 
 #[test]
@@ -18,9 +19,9 @@ fn agent_start_command_works() {
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexport HERDR_AGENT=pi\n'{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\nwhile IFS= read -r prompt; do\n  case \"$prompt\" in \"do not transition\"|\"stall\") continue ;; esac\n  '{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state working >/dev/null\n  '{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\n  printf '%s\\n' \"$prompt\" >> '{}'\ndone\n",
             captured_args.display(),
-            env!("CARGO_BIN_EXE_herdr"),
-            env!("CARGO_BIN_EXE_herdr"),
-            env!("CARGO_BIN_EXE_herdr"),
+            env!("CARGO_BIN_EXE_vimeflow"),
+            env!("CARGO_BIN_EXE_vimeflow"),
+            env!("CARGO_BIN_EXE_vimeflow"),
             captured_prompts.display(),
         ),
     )

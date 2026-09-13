@@ -76,6 +76,10 @@ impl AppState {
         terminal_runtimes: &TerminalRuntimeRegistry,
         mouse: MouseEvent,
     ) {
+        #[cfg(unix)]
+        if self.handle_trace_mouse(mouse) {
+            return;
+        }
         if self.mode != Mode::Terminal {
             return;
         }
@@ -106,6 +110,11 @@ impl AppState {
     ) -> Option<MouseAction> {
         if self.mode == Mode::Onboarding {
             self.handle_onboarding_mouse(mouse);
+            return None;
+        }
+
+        #[cfg(unix)]
+        if self.handle_trace_mouse(mouse) {
             return None;
         }
 
@@ -639,15 +648,41 @@ impl AppState {
                         return None;
                     }
 
+                    // Before the card hit: a trace row sits inside the card's
+                    // span, so the more specific target has to win.
+                    #[cfg(unix)]
+                    if let Some((pane_id, id)) = self.trace_target_at(mouse.column, mouse.row) {
+                        let already = self
+                            .agent_trace_focus
+                            .as_ref()
+                            .is_some_and(|(pane, current)| *pane == pane_id && *current == id);
+                        if already {
+                            self.open_trace_detail();
+                        } else {
+                            // Click selects; only a click on the already
+                            // selected row opens it.
+                            self.select_trace(pane_id, &id);
+                        }
+                        return None;
+                    }
+
                     if let Some((ws_idx, tab_idx, pane_id, chevron)) =
                         self.agent_detail_target_at(mouse.column, mouse.row)
                     {
                         if chevron && self.is_active_pane(ws_idx, tab_idx, pane_id) {
                             self.agent_card_collapsed_for =
                                 (self.agent_card_collapsed_for != Some(pane_id)).then_some(pane_id);
+                            // Collapsing the anchor unrenders its trace rows.
+                            #[cfg(unix)]
+                            self.exit_agents_mode();
                             return None;
                         }
                         self.mode = Mode::Terminal;
+                        // Ids are only pane-unique, so a stale pair carried
+                        // onto a new card could look valid. Clear on every
+                        // focus change.
+                        #[cfg(unix)]
+                        self.exit_agents_mode();
                         return Some(MouseAction::FocusPane { ws_idx, pane_id });
                     }
                 } else if let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() {

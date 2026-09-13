@@ -1,7 +1,8 @@
 #!/bin/sh
+# Modified from herdr by the vimeflow project — see FORK.md
 # managed by herdr; reinstalling the integration replaces this file.
 # HERDR_INTEGRATION_ID=kimi
-# HERDR_INTEGRATION_VERSION=6
+# HERDR_INTEGRATION_VERSION=7
 
 action="${1:-}"
 case "$action" in

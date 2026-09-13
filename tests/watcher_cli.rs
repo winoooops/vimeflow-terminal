@@ -4,12 +4,18 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::process::{Command, Stdio};
 
+/// Kept short on purpose. The watcher's state socket lands at
+/// `<root>/s/<app-dir>/plugins/herdr-agent-watcher/herdr-agent-watcher-state.sock`,
+/// and macOS caps a Unix socket path at 104 bytes. A full-width nanosecond
+/// nonce left only a couple of bytes of headroom, which the fork's longer
+/// directory name then consumed — binding failed with a bare ENOENT that looks
+/// nothing like the length limit it actually is.
 fn temporary_root() -> std::path::PathBuf {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
+        .map(|duration| duration.as_nanos() as u32)
         .unwrap_or_default();
-    std::path::Path::new("/tmp").join(format!("hw-{}-{nonce:x}", std::process::id()))
+    std::path::Path::new("/tmp").join(format!("hw{}-{nonce:x}", std::process::id()))
 }
 
 #[test]
@@ -20,7 +26,7 @@ fn generated_bridge_script_resolves_through_the_fork_cli() {
     let claude_home = root.join("a");
     std::fs::create_dir_all(&claude_home).expect("Claude config directory");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_herdr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
         .args(["watcher", "claude-bridge", "enable"])
         .env("XDG_STATE_HOME", &state_home)
         .env("XDG_CONFIG_HOME", &config_home)
@@ -48,7 +54,7 @@ fn generated_bridge_script_resolves_through_the_fork_cli() {
         .to_string();
 
     let watcher_state = state_home
-        .join("herdr-dev")
+        .join("vimeflow-dev")
         .join("plugins")
         .join("herdr-agent-watcher");
     let socket = watcher_state.join("herdr-agent-watcher-state.sock");

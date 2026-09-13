@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 const API_SCHEMA_JSON: &str = include_str!("../../docs/next/api/herdr-api.schema.json");
 
 use crate::api::schema::{EmptyParams, Method, Request};
@@ -55,7 +56,7 @@ fn api_schema(args: &[String]) -> std::io::Result<i32> {
 
 fn api_snapshot(args: &[String]) -> std::io::Result<i32> {
     if !args.is_empty() {
-        eprintln!("usage: herdr api snapshot");
+        eprintln!("usage: vimeflow api snapshot");
         return Ok(2);
     }
 
@@ -103,7 +104,7 @@ fn print_api_help() {
 }
 
 fn print_api_schema_help() {
-    eprintln!("usage: herdr api schema [--json | --output PATH]");
+    eprintln!("usage: vimeflow api schema [--json | --output PATH]");
 }
 
 #[cfg(test)]

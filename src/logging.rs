@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -19,8 +20,14 @@ pub(crate) fn init_file_logging(file_name: &str) {
         return;
     };
 
-    let filter =
-        EnvFilter::try_from_env("HERDR_LOG").unwrap_or_else(|_| EnvFilter::new("herdr=info"));
+    // Both crates have to be named. A directive matches by string prefix, so
+    // upstream's single `herdr=info` happened to cover `herdr_agent_watcher`
+    // too. Renaming the binary moved our own targets to `vimeflow::…` and, less
+    // obviously, dropped the watcher's — leaving the embedded watcher running
+    // with nothing to show for it in the log, which is the one place you look
+    // when its cards come up empty.
+    let filter = EnvFilter::try_from_env("HERDR_LOG")
+        .unwrap_or_else(|_| EnvFilter::new("vimeflow=info,herdr_agent_watcher=info"));
 
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)

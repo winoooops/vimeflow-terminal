@@ -413,6 +413,13 @@ impl App {
                 }
             }
             NavigateAction::IslandPanelToggle => self.state.toggle_island_panel(),
+            NavigateAction::FocusAgents => {
+                #[cfg(unix)]
+                self.state.enter_agents_mode();
+                if self.state.mode == Mode::Navigate {
+                    leave_navigate_mode(&mut self.state);
+                }
+            }
             NavigateAction::Detach => {
                 super::modal::request_detach(&mut self.state);
                 leave_navigate_mode(&mut self.state);
@@ -1380,6 +1387,7 @@ pub(crate) enum NavigateAction {
     ReloadConfig,
     OpenNotificationTarget,
     IslandPanelToggle,
+    FocusAgents,
     Detach,
     OpenNavigator,
 }
@@ -1524,6 +1532,7 @@ pub(super) fn non_indexed_action_for_key(
             NavigateAction::OpenNotificationTarget,
         ),
         (&kb.island_panel_toggle, NavigateAction::IslandPanelToggle),
+        (&kb.focus_agents, NavigateAction::FocusAgents),
         (&kb.detach, NavigateAction::Detach),
         (&kb.goto, NavigateAction::OpenNavigator),
     ] {
@@ -1779,6 +1788,13 @@ pub(super) fn execute_navigate_action_in_context(
         }
         NavigateAction::IslandPanelToggle => {
             state.toggle_island_panel();
+        }
+        NavigateAction::FocusAgents => {
+            #[cfg(unix)]
+            state.enter_agents_mode();
+            if state.mode == Mode::Navigate {
+                leave_navigate_mode(state);
+            }
         }
         NavigateAction::Detach => {
             super::modal::request_detach(state);

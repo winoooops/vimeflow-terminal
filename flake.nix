@@ -1,3 +1,4 @@
+# Modified from herdr by the vimeflow project — see FORK.md
 {
   description = "herdr — terminal workspace manager for AI coding agents";
 
@@ -67,7 +68,7 @@
       apps = forAllSystems (system: {
         default = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/herdr";
+          program = "${self.packages.${system}.default}/bin/vimeflow";
           meta.description = "Run Herdr";
         };
       });

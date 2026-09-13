@@ -1,3 +1,28 @@
+# Integration binaries that spawn a real server and PTYs, then wait on shell
+# output. Run concurrently they compete for CPU, file descriptors and fs
+# watches — most visibly on a machine already hosting a live session with its
+# own server and agents — and time out waiting for echo that is merely late.
+# Each passes in isolation, so cap them to one at a time rather than papering
+# over it with longer timeouts, which would only make a real hang slower to
+# surface.
+[test-groups]
+spawns-server = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = '''
+    binary(api_ping)
+    or binary(auto_detect)
+    or binary(client_mode)
+    or binary(cross_area)
+    or binary(detach_reattach)
+    or binary(live_handoff)
+    or binary(multi_client)
+    or binary(server_headless)
+    or binary(watcher_cli)
+'''
+test-group = 'spawns-server'
+
+# Upstream graphics race, unrelated to the fork.
 [[profile.default.overrides]]
 filter = 'test(=api::server::pane_graphics_stream::tests::inactive_owner_cancels_idle_stream_and_dispatches_close)'
 retries = 2

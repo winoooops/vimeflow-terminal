@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -496,11 +497,11 @@ mod tests {
         assert_eq!(line_text(&lines[0]), " ● update ready");
         assert_eq!(
             line_text(&lines[1]),
-            " detach, run herdr update, then follow its restart guidance"
+            " detach, run vimeflow update, then follow its restart guidance"
         );
         assert_eq!(lines[0].spans[1].style.fg, Some(palette.accent));
         assert_eq!(lines[0].spans[2].style.fg, Some(palette.text));
-        assert_eq!(lines[1].spans[2].content.as_ref(), "herdr update");
+        assert_eq!(lines[1].spans[2].content.as_ref(), "vimeflow update");
         assert_eq!(lines[1].spans[2].style.fg, Some(palette.accent));
         assert_eq!(lines[1].spans[2].style.bg, Some(palette.surface0));
     }
@@ -520,7 +521,7 @@ mod tests {
         assert_eq!(line_text(&lines[0].1), " ● update ready");
         assert_eq!(
             line_text(&lines[1].1),
-            " detach, run herdr update, then follow its restart guidance"
+            " detach, run vimeflow update, then follow its restart guidance"
         );
         assert_eq!(line_text(&lines[2].1), "");
         assert_eq!(line_text(&lines[3].1), " ADDED");

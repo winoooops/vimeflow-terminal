@@ -48,6 +48,15 @@ mod selection;
 mod settings;
 mod sidebar;
 mod terminal;
+#[cfg(unix)]
+mod trace;
+
+/// The agent watcher is a Unix-only dependency, so trace navigation cannot be
+/// entered on Windows. `Mode::Agents` still exists for the shared match arms.
+#[cfg(not(unix))]
+impl App {
+    pub(crate) fn handle_trace_key(&mut self, _key: crate::input::TerminalKey) {}
+}
 
 pub(crate) use self::{
     lease::{ConsumedInputLease, ForwardedInputLease, InputLeaseKey, InputLeaseTable, RepeatPlan},
@@ -124,11 +133,12 @@ impl App {
             Mode::Prefix => self.handle_prefix_key(key),
             Mode::Navigate => self.handle_navigate_key(key),
             Mode::Copy => self.handle_copy_mode_key(key),
+            Mode::Agents => self.handle_trace_key(key),
             _ => match self.state.mode {
                 Mode::Onboarding => self.handle_onboarding_key(key_event),
                 Mode::ReleaseNotes => self.handle_release_notes_key(key_event),
                 Mode::ProductAnnouncement => self.handle_product_announcement_key(key_event),
-                Mode::Prefix | Mode::Navigate | Mode::Copy => unreachable!(),
+                Mode::Prefix | Mode::Navigate | Mode::Copy | Mode::Agents => unreachable!(),
                 Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane => {
                     self.handle_rename_key_via_api(key_event)
                 }
@@ -361,6 +371,10 @@ impl App {
         source_id: super::InputSourceId,
         mouse: MouseEvent,
     ) {
+        #[cfg(unix)]
+        if self.state.handle_trace_mouse(mouse) {
+            return;
+        }
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.pending_url_click_sources.remove(&source_id);

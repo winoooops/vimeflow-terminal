@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use super::harness::*;
 
 #[test]
@@ -542,7 +543,7 @@ fn config_check_rejects_json_output() {
     assert!(checked.stdout.is_empty());
     assert_eq!(
         String::from_utf8_lossy(&checked.stderr),
-        "usage: herdr config check\n"
+        "usage: vimeflow config check\n"
     );
 
     cleanup_test_base(&base);

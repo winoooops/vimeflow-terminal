@@ -20,6 +20,14 @@ use manifest::{
     effective_platforms, ensure_platform_supported, normalize_action_id, normalize_plugin_source,
 };
 
+/// The standalone agent-watcher plugin, whose runtime this fork embeds and
+/// whose sidebar this fork renders natively. Matched by id so no other
+/// plugin's `open-sidebar` action is intercepted.
+#[cfg(unix)]
+const WATCHER_PLUGIN_ID: &str = "herdr-agent-watcher";
+#[cfg(unix)]
+const WATCHER_SIDEBAR_ACTION_ID: &str = "open-sidebar";
+
 #[cfg(test)]
 use crate::api::schema::{PluginCommandStatus, PluginInvocationContext};
 pub(crate) use manifest::load_plugin_manifest;
@@ -233,6 +241,17 @@ impl App {
         let (plugin, action) = self
             .find_plugin_action(None, &action_id)
             .map_err(|(_, message)| message)?;
+        // The fork embeds the watcher's runtime and renders its cards in
+        // herdr's own agents sidebar, so its split-pane sidebar action opens
+        // that instead of launching the superseded standalone binary. The
+        // plugin keeps its manifest, config and managed keybinding; only where
+        // the action lands changes, and it lands there whether or not the
+        // standalone plugin is enabled.
+        #[cfg(unix)]
+        if plugin.plugin_id == WATCHER_PLUGIN_ID && action.action_id == WATCHER_SIDEBAR_ACTION_ID {
+            self.state.enter_agents_mode();
+            return Ok(());
+        }
         if !plugin.enabled {
             return Err(format!("plugin {} is disabled", plugin.plugin_id));
         }

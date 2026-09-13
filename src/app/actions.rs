@@ -6505,7 +6505,7 @@ mod tests {
         assert_eq!(toast.title, "v0.5.0 available");
         assert_eq!(
             toast.context,
-            "detach, run `herdr update`, then follow its restart guidance"
+            "detach, run `vimeflow update`, then follow its restart guidance"
         );
     }
 

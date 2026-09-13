@@ -166,24 +166,30 @@ the top of the file:
 
 | Upstream path | Reason | Fork commit |
 | --- | --- | --- |
+| `src/remote/unix.rs` | Discover and install remote binaries under Vimeflow names, validating the staged fork version and protocol before replacement. | PR #17 blocking fixes |
 | `src/update.rs` | Prevent hosted Herdr manifest fetches, self-update installs, and background update checks in the fork. | `faf956e9b815045ca114d89b7faf9534386e0e8b` |
 | `src/cli.rs` | Reject fork-disabled update channels, dispatch the native watcher CLI, and share its coexistence diagnostics with server startup. | `dded4c73`, `b3aff323` |
 | `src/product_announcements.rs` | Ignore announcements delivered through stock Herdr update manifests while retaining local preview support and its intentionally dormant helpers. | `faf956e9b815045ca114d89b7faf9534386e0e8b`, P5 clippy gate (this commit) |
-| `src/app/mod.rs` | Align stock-manifest and legacy-row tests, register native title sync (+ the ungated pane_label module so Windows keeps the rename API), apply live Agents-card, compact-rail, and tab-island settings, initialize island view and notification state, route headless island-panel text/paste interception, orchestrate input-source-safe panel closure, preserve island toast lifetimes, and initialize watcher telemetry. | `e312ccf8`, `e006a1ea`, `b8a6406c`, `95a7db2a`, P5 gate fix, compact-rail numbers, PR #6, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit), island notifications (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), emoji island bell (this commit), island notification review fixes (this commit), island panel geometry reconciliation (this commit), island notification marvin fixes (this commit), island notification popup exclusion (this commit), island notification single-client follow-up (this commit) |
+| `src/app/mod.rs` | Align stock-manifest and legacy-row tests, register native title sync (+ the ungated pane_label module so Windows keeps the rename API), apply live Agents-card, compact-rail, and tab-island settings, initialize island view and notification state, route headless island-panel text/paste interception, reconcile Agents navigation and detail visibility from foreground geometry, orchestrate input-source-safe panel closure, preserve island toast lifetimes, and initialize watcher telemetry. | `e312ccf8`, `e006a1ea`, `b8a6406c`, `95a7db2a`, P5 gate fix, compact-rail numbers, PR #6, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit), island notifications (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), emoji island bell (this commit), island notification review fixes (this commit), island panel geometry reconciliation (this commit), island notification marvin fixes (this commit), island notification popup exclusion (this commit), island notification single-client follow-up (this commit) |
 | `src/app/actions.rs` | Trigger coalesced title recomputation, reset focused-card collapse state on pane focus changes, refresh island hit geometry after tab mutations, and produce, maintain, activate, and expire island notification records and their single arrival toasts with popup mutual exclusion. | `e006a1ea`, `158aabf9`, dynamic island capsule (this commit), island motion (this commit), island active title (this commit), island notifications (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), island notification review fixes (this commit), island notification marvin fixes (this commit), island notification popup exclusion (this commit), island notification single-client follow-up (this commit) |
 | `src/app/api.rs` | Initialize island record activation metadata on API-created notification toasts and refresh island-owned arrival contexts from live runtimes. | island notification arrivals (this commit), island notification single-client follow-up (this commit) |
-| `src/app/input/mod.rs` | Prioritize island-panel key dispatch before pane input, preserve prefix-binding semantics while it is open, consume text and paste, and keep its command keys ASCII-capable. | island notification panel (this commit), island notification review fixes (this commit), island notification marvin fixes (this commit), island notification single-client follow-up (this commit) |
+| `src/app/input/mod.rs` | Intercept trace detail mouse events before pane focus and URL handlers. Prioritize island-panel key dispatch before pane input, preserve prefix-binding semantics while it is open, consume text and paste, and keep its command keys ASCII-capable. | island notification panel (this commit), island notification review fixes (this commit), island notification marvin fixes (this commit), island notification single-client follow-up (this commit), PR #17 blocking fixes |
 | `src/app/input/navigate.rs` | Keep indexed and relative Agent focus aligned with the cards-visible order, initialize island record activation metadata on navigation toasts, and dispatch the island-panel keybind. | `158aabf9`, island notification arrivals (this commit), island notification panel (this commit), island notification review fixes (this commit) |
-| `src/app/input/mouse.rs` | Focus Agent cards, toggle the focused card from its chevron zone, route island marker, bell, panel, and context-menu clicks, keep tab reordering classic-only, and activate ordinary and island-owned toasts. | `158aabf9`, dynamic island capsule (this commit), empty island labels (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), first-class island bell (this commit), island notification review fixes (this commit), island notification reconciliation (this commit) |
+| `src/app/input/mouse.rs` | Consume trace detail mouse events and scroll the panel body. Focus Agent cards, toggle the focused card from its chevron zone, route island marker, bell, panel, and context-menu clicks, keep tab reordering classic-only, and activate ordinary and island-owned toasts. | `158aabf9`, dynamic island capsule (this commit), empty island labels (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), first-class island bell (this commit), island notification review fixes (this commit), island notification reconciliation (this commit), PR #17 blocking fixes |
 | `src/app/input/sidebar.rs` | Use card-aware body geometry for Agent hit testing and keep classic tab-drag tests on the classic renderer. | `158aabf9`, P5 gate fix (this commit), dynamic island capsule (this commit) |
 | `src/app/input/modal.rs` | Snap the island animation when a TUI rename changes rendered title geometry and handle island-panel menu keys. | island motion (this commit), island active title (this commit), island notification panel (this commit) |
+| `.github/workflows/ci.yml` | Point the Windows ConPTY smoke and packaging steps at the renamed build output. The bundle's internal `herdr.exe` name is upstream's and left alone. | vimeflow rename (this commit) |
+| `.github/workflows/preview.yml` | Same, for the preview packaging step. | vimeflow rename (this commit) |
+| `scripts/windows_check.ps1` | Lint and test the renamed bin target. | vimeflow rename (this commit) |
+| `src/cli/server_not_running.rs` | Name the renamed executable in the socket-override branch of the start hint. | vimeflow rename (this commit) |
+| `src/ui/menus.rs` | Render the agent-card trace mode bar and the watcher-backed trace detail panel with a single frame and space for its body. | agent card trace navigation (this commit), PR #17 blocking fixes |
 | `src/app/input/terminal.rs` | Initialize island record activation metadata on terminal-input toast fixtures and intercept island-panel keys before pane forwarding. | island notification arrivals (this commit), island notification panel (this commit), island notification review fixes (this commit) |
 | `src/app/api/layouts.rs` | Clear island animation before applying API-driven layout replacements. | island motion (this commit) |
 | `src/app/api/panes.rs` | Route pane-label API mutations through the shared title ownership and event helper, clear island animation on API pane moves, and retarget island records after pane moves. | `e006a1ea`, island motion (this commit), island notification review fixes (this commit) |
-| `src/app/api/plugins/mod.rs` | Cover the plugin-tab island-animation clear with a regression test. | island motion (this commit) |
+| `src/app/api/plugins/mod.rs` | Cover the plugin-tab island-animation clear with a regression test, and route the agent watcher's `open-sidebar` action to the native agents sidebar the fork renders in its place. | island motion (this commit), agent card trace navigation (this commit) |
 | `src/app/api/plugins/panes.rs` | Clear island animation when a plugin-created tab lands in the active workspace. | island motion (this commit) |
 | `src/app/api/tabs.rs` | Keep classic tab-bar reflow coverage and snap island motion when API renames change rendered title geometry. | dynamic island capsule (this commit), island motion (this commit), island active title (this commit) |
-| `src/app/state.rs` | Track title-sync generations, live Agents-card, compact-rail, tab-island presentation and notification state, toast activation and delayed-delivery metadata, hit geometry, and non-blocking watcher telemetry snapshots. | `e006a1ea`, `b8a6406c`, `95a7db2a`, compact-rail numbers, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit), island notifications (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), island notification single-client follow-up (this commit) |
+| `src/app/state.rs` | Keep Agents commands in the ASCII input-source realm. Track title-sync generations, live Agents-card, compact-rail, tab-island presentation and notification state, toast activation and delayed-delivery metadata, hit geometry, and non-blocking watcher telemetry snapshots. | `e006a1ea`, `b8a6406c`, `95a7db2a`, compact-rail numbers, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit), island notifications (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), island notification single-client follow-up (this commit) |
 | `src/app/runtime.rs` | Tick island springs, include their deadline in the monolithic run-loop scheduler, and repaint/capture panel mouse input. | island motion (this commit), island notification panel (this commit), island panel geometry reconciliation (this commit) |
 | `src/app/popup.rs` | Keep popup panes and the island notification panel mutually exclusive while restoring the host input source on popup open. | island notification popup exclusion (this commit) |
 | `README.md` | Replace upstream's product README with fork framing: try-herdr-first redirect, the opinionated-layer scope, shipped/upcoming features, build-from-source instructions, tracking-fork model, and attribution. Upstream's sponsor block, download/stars badges, demo video, and logo are dropped; a sponsor-herdr credit line is kept. | PR #2 |
@@ -200,23 +206,74 @@ the top of the file:
 | `docs/next/website/src/data/config-reference.json` | Add the native agent watcher, title-sync, Agent-card, compact-rail, and tab-island and toast-position configuration and keybinding keys to the generated user reference snapshot. | `18a6a734`, P5, compact-rail numbers, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit), island active title (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), emoji island bell (this commit), island toast placement (this commit) |
 | `Cargo.toml` | Add the Unix-only `herdr-agent-watcher` runtime dependency, now pinned to `v0.2.4`, plus direct SQLite access for OpenCode titles. | `ebff8667`, `4df9fb1a`, `95a7db2a`, watcher v0.2.4 bump (this commit) |
 | `Cargo.lock` | Lock the watcher tag and direct SQLite reader dependency. | `ebff8667`, `4df9fb1a`, `95a7db2a`, watcher v0.2.4 bump (this commit) |
-| `nix/package.nix` | Supply the fixed-output hash for the watcher Git dependency. | `ebff8667`, `95a7db2a`, watcher v0.2.4 bump (this commit) |
+| `nix/package.nix` | Supply the verified NAR hash for watcher v0.2.8 (49ab194f) and select vimeflow as the main program. | `ebff8667`, `95a7db2a`, watcher v0.2.4 bump (this commit), PR #17 blocking fixes |
 | `src/api/schema/tests.rs` | Keep the generated schema canonically ordered when the watcher enables `serde_json/preserve_order`. | `502f2f6b993e62e99ad98b97a71e813a0e258bc3` |
 | `src/config/model.rs` | Add startup-only native watcher and title-sync sections plus live tab-island configuration, notification policy, panel keybinding, and island-anchored toast defaults. | `c3c70979`, dynamic island capsule (this commit), island motion (this commit), island active title (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), emoji island bell (this commit), island toast placement (this commit) |
 | `src/config/keybinds.rs` | Parse, validate, and expose the rebindable island-panel toggle action. | island notification panel (this commit) |
-| `src/config/io.rs` | Recognize native feature sections and diagnose legacy Agents-row settings and invalid compact-rail and island bell mark overrides from raw startup/live TOML. | `c3c70979`, `b8a6406c`, compact-rail agent marks (this commit), island notification bell (this commit) |
+| `src/logging.rs` | Point the default tracing filter at the renamed crate root; a bin rename moves every target, and a stale directive silently disables all file logging. | vimeflow rename (this commit) |
+| `src/config/io.rs` | Recognize native feature sections and diagnose legacy Agents-row settings and invalid compact-rail and island bell mark overrides from raw startup/live TOML; own the fork's isolated app directory names. | `c3c70979`, `b8a6406c`, compact-rail agent marks (this commit), island notification bell (this commit), vimeflow rename (this commit) |
 | `src/config.rs` | Export the fork's Agents-card view, compact-rail leading, and tab-island configuration types. | `b8a6406c`, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit), island notification arrivals (this commit) |
 | `src/config/sidebar.rs` | Add live Agents-card, idle-filter, and compact-rail number and agent-mark settings beside legacy row configuration. | `b8a6406c`, compact-rail numbers, compact-rail agent marks (this commit) |
-| `src/server/headless.rs` | Own the embedded watcher, telemetry ingestion, and title-sync lifecycles across normal and handoff server paths, reconcile shared island-panel state from foreground-client geometry, own foreground input-source switching, keep island arrivals out of stock notification delivery, reject retained PTY patching under the panel, warn about enabled standalone twins, and keep test construction cfg-clean on Windows. | `dd08df50`, `e006a1ea`, `b3aff323`, `95a7db2a`, PR #6, island motion (this commit), island notification arrivals (this commit), island panel geometry reconciliation (this commit), island notification review fixes (this commit), island notification single-client follow-up (this commit) |
-| `src/cli/spec.rs` | Describe the native watcher command group and its supported subcommands. | `dded4c73` |
+| `src/server/headless.rs` | Own the embedded watcher, telemetry ingestion, and title-sync lifecycles across normal and handoff server paths, reconcile shared island-panel and Agents navigation state from foreground-client geometry, own foreground input-source switching, keep island arrivals out of stock notification delivery, reject retained PTY patching under the panel, warn about enabled standalone twins, and keep test construction cfg-clean on Windows. | `dd08df50`, `e006a1ea`, `b3aff323`, `95a7db2a`, PR #6, island motion (this commit), island notification arrivals (this commit), island panel geometry reconciliation (this commit), island notification review fixes (this commit), island notification single-client follow-up (this commit) |
+| `src/cli/spec.rs` | Describe the native watcher command group and its supported subcommands, and name the program `vimeflow` in generated usage. | `dded4c73`, vimeflow rename (this commit) |
 | `src/main.rs` | Register the Unix-only native title-sync and Agent-card modules. | `f4af78b5`, `95a7db2a` |
 | `src/events.rs` | Return blocking title-reader results to the server thread for identity-checked application. | `e006a1ea` |
-| `src/ui.rs` | Export shared Agent-card geometry to sidebar input handling and compute tab-island row, panel, hit geometry, and notification-driven one-tab visibility, with shared desktop toast render and hit geometry. | `158aabf9`, dynamic island capsule (this commit), island motion (this commit), island notification arrivals (this commit), island notification panel (this commit), island notification review fixes (this commit), island panel geometry reconciliation (this commit), island notification marvin fixes (this commit), island toast placement (this commit) |
+| `src/ui.rs` | Export shared Agent-card geometry to sidebar input handling, keep selected cards visible after geometry or telemetry changes, and compute tab-island row, panel, hit geometry, and notification-driven one-tab visibility, with shared desktop toast render and hit geometry. | `158aabf9`, dynamic island capsule (this commit), island motion (this commit), island notification arrivals (this commit), island notification panel (this commit), island notification review fixes (this commit), island panel geometry reconciliation (this commit), island notification marvin fixes (this commit), island toast placement (this commit), PR #17 final review |
 | `src/ui/keybind_help.rs` | Show the island notification panel action in keybinding help. | island notification panel (this commit) |
 | `src/ui/tab_surface.rs` | Characterize the island-default full-app frame while retaining the classic frame baseline. | dynamic island capsule (this commit), stable island capsule (this commit) |
 | `src/ui/tabs.rs` | Dispatch tab-bar rendering and geometry between the classic bar and the fork-added island, including capsule and interaction hit areas. | dynamic island capsule (this commit), island active title (this commit), stable island capsule (this commit), island notification panel (this commit) |
 | `src/ui/sidebar.rs` | Delegate Agents content to adaptive cards, render the compact rail with configurable leading slots and centered dot-only rows, and keep shared geometry cfg-clean on Windows. | `158aabf9`, `53970ca3`, P5 clippy gate, compact-rail numbers, centered rail dots, PR #6, compact-rail agent marks (this commit) |
 | `src/ui/status.rs` | Anchor desktop toasts to the island, preserve corner placement, and initialize island record activation metadata on status-toast fixtures. | island notification arrivals (this commit), island toast placement (this commit) |
+| `flake.nix` | Launch the renamed vimeflow executable from the Nix app. | PR #17 blocking fixes |
+| `skills/herdr/SKILL.md` | Teach bundled callers to use vimeflow while retaining HERDR_* session routing. | PR #17 blocking fixes |
+| `src/cli/completion.rs` | Register generated shell completions for the vimeflow executable. | PR #17 blocking fixes |
+| `src/integration/assets/antigravity_cli/herdr-agent-state.ps1` | Call vimeflow and bump the paired integration version once from v0.8.0, retaining HERDR_* routing. | PR #17 blocking fixes |
+| `src/integration/assets/antigravity_cli/herdr-agent-state.sh` | Align the Unix hook marker with its Windows counterpart’s fork CLI migration version. | PR #17 blocking fixes |
+| `src/integration/assets/claude/herdr-agent-state.ps1` | Call vimeflow and bump the paired integration version once from v0.8.0, retaining HERDR_* routing. | PR #17 blocking fixes |
+| `src/integration/assets/claude/herdr-agent-state.sh` | Align the Unix hook marker with its Windows counterpart’s fork CLI migration version. | PR #17 blocking fixes |
+| `src/integration/assets/codex/herdr-agent-state.ps1` | Call vimeflow and bump the paired integration version once from v0.8.0, retaining HERDR_* routing. | PR #17 blocking fixes |
+| `src/integration/assets/codex/herdr-agent-state.sh` | Align the Unix hook marker with its Windows counterpart’s fork CLI migration version. | PR #17 blocking fixes |
+| `src/integration/assets/copilot/herdr-agent-state.ps1` | Call vimeflow and bump the paired integration version once from v0.8.0, retaining HERDR_* routing. | PR #17 blocking fixes |
+| `src/integration/assets/copilot/herdr-agent-state.sh` | Align the Unix hook marker with its Windows counterpart’s fork CLI migration version. | PR #17 blocking fixes |
+| `src/integration/assets/droid/herdr-agent-state.ps1` | Call vimeflow and bump the paired integration version once from v0.8.0, retaining HERDR_* routing. | PR #17 blocking fixes |
+| `src/integration/assets/droid/herdr-agent-state.sh` | Align the Unix hook marker with its Windows counterpart’s fork CLI migration version. | PR #17 blocking fixes |
+| `src/integration/assets/kimi/herdr-agent-state.ps1` | Call vimeflow and bump the paired integration version once from v0.8.0, retaining HERDR_* routing. | PR #17 blocking fixes |
+| `src/integration/assets/kimi/herdr-agent-state.sh` | Align the Unix hook marker with its Windows counterpart’s fork CLI migration version. | PR #17 blocking fixes |
+| `src/integration/assets/qodercli/herdr-agent-state.ps1` | Call vimeflow and bump the paired integration version once from v0.8.0, retaining HERDR_* routing. | PR #17 blocking fixes |
+| `src/integration/assets/qodercli/herdr-agent-state.sh` | Call vimeflow and bump the paired integration version once from v0.8.0, retaining HERDR_* routing. | PR #17 blocking fixes |
+| `src/integration/mod.rs` | Migrate the fork CLI hooks once from the integration versions released in v0.8.0. | PR #17 blocking fixes |
+| `src/integration/tests.rs` | Keep outdated integration status expectations aligned with the migration constants. | PR #17 blocking fixes |
+| `tests/cli/hooks.rs` | Verify the QoderCLI hook calls vimeflow with inherited session routing even beside upstream herdr. | PR #17 blocking fixes |
+| `tests/cli/surface.rs` | Verify both completion generators register vimeflow without starting a session. | PR #17 blocking fixes |
+
+| `src/cli/agent.rs` | Name vimeflow in agent command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/api.rs` | Name vimeflow in api command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/integration.rs` | Name vimeflow in integration command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/notification.rs` | Name vimeflow in notification command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/pane.rs` | Name vimeflow in pane command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/plugin.rs` | Name vimeflow in plugin command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/server.rs` | Name vimeflow in server command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/tab.rs` | Name vimeflow in tab command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/workspace.rs` | Name vimeflow in workspace command usage and diagnostics. | PR #17 blocking fixes |
+| `src/cli/worktree.rs` | Name vimeflow in worktree command usage and diagnostics. | PR #17 blocking fixes |
+| `src/client/mod.rs` | Name vimeflow in server-start and reattach guidance and matching tests. | PR #17 blocking fixes |
+| `src/server/autodetect.rs` | Name vimeflow in launch documentation, startup diagnostics, and restart guidance tests. | PR #17 blocking fixes |
+| `src/session.rs` | Build vimeflow session attach/stop commands and align usage and restart guidance tests. | PR #17 blocking fixes |
+| `src/ui/release_notes.rs` | Name the fork executable in update guidance and matching rendering tests. | PR #17 blocking fixes |
+| `tests/api_ping.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/auto_detect.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/client_mode.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/cross_area.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/detach_reattach.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/live_handoff.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/multi_client.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/server_headless.rs` | Run the renamed vimeflow binary and use its configuration and session directories in integration tests. | PR #17 blocking fixes |
+| `tests/cli/agents.rs` | Invoke the renamed vimeflow binary in agent CLI test commands. | PR #17 blocking fixes |
+| `tests/cli/harness.rs` | Launch vimeflow and locate its configuration, session, and plugin directories in the CLI harness. | PR #17 blocking fixes |
+| `tests/cli/plugins.rs` | Use the vimeflow-dev directory in plugin CLI tests. | PR #17 blocking fixes |
+| `tests/cli/sessions.rs` | Invoke vimeflow and expect the renamed session attach and startup hints. | PR #17 blocking fixes |
+| `tests/cli/workspace.rs` | Expect vimeflow in configuration-check usage output. | PR #17 blocking fixes |
+| `tests/support/mod.rs` | Identify test servers by the renamed vimeflow binary path on Linux. | PR #17 blocking fixes |
 
 Non-commentable modified files must also be listed in `MODIFICATIONS` beside
 `LICENSE`.
@@ -237,24 +294,52 @@ For each upstream release:
 5. Merge the sync PR into `main`; never auto-resolve conflicts or commit fork
    work directly to `master`.
 
-## Deferred branding rename surface
+## Branding rename surface
 
-The M0b bootstrap intentionally keeps the `herdr` binary/CLI name, socket and
-state/config paths, environment variables, and command grammar so existing
-Tier-1 plugins and operator workflows remain compatible.
+### Renamed
 
-A later, separately specified branding pass must inventory and migrate:
+- The executable is `vimeflow` (`[[bin]]` in `Cargo.toml`). The Cargo *package*
+  is still `herdr`, so `herdr::` paths in `tests/` and the registry above keep
+  resolving.
+- `config::io::app_dir_name()` is `vimeflow` / `vimeflow-dev`, which moves the
+  config dir, state dir, sessions, sockets and plugin state together.
+- User-facing command strings: clap's program name, `--help` usage, the
+  `session::local_attach_command` / `stop_command_for` builders, and the "run
+  `…`" hints in error messages.
 
-- Cargo package, binary, release asset, installer, and package-manager names;
-- user-facing Herdr strings, help text, documentation, icons, and logos;
-- socket/session identifiers, config/state/cache paths, and `HERDR_*`
-  environment variables;
-- plugin command contracts and a compatibility alias/migration period.
+Vimeflow starts with a clean configuration in its own directory.
+
+Two consequences worth remembering, both found by tests rather than review:
+
+- **Tracing targets follow the bin name, not the package name.** Renaming the
+  executable moved every target from `herdr::…` to `vimeflow::…`, so the
+  default filter in `src/logging.rs` had to change with it. A stale directive
+  there matches nothing and silently disables all file logging.
+- **The directory name is three bytes longer**, and macOS caps a Unix socket
+  path at 104 bytes. Anything that builds a socket path under the app dir now
+  has three bytes less headroom; `tests/watcher_cli.rs` had to shorten its
+  temporary root to stay under the limit.
+
+### Deliberately not renamed
+
+`HERDR_*` environment variables and the `herdr.sock` / `herdr-client.sock`
+filenames are the integration protocol. `herdr-agent-watcher` alone reads nine
+of those variables and is pinned to a released tag, so renaming them breaks
+plugins for no user-visible gain. `HERDR_LOG` keeps its name; only the
+directive value inside it names the crate.
+
+A later pass would still need to cover release asset, installer and
+package-manager names, remaining user-facing "Herdr" prose, icons and logos,
+and a compatibility alias period if the environment protocol is ever renamed.
 
 ## M0b boundary note
 
 `src/remote/unix.rs` also references Herdr-hosted manifests to provision a
-matching binary on a remote host. It does not update the local fork and was
-left untouched because M0b explicitly scopes neutralization to `src/update.rs`,
-channel machinery, and product announcements. Reassess that remote workflow
-before enabling remote execution in the fork.
+matching binary on a remote host. It does not update the local fork; M0b
+scoped neutralization to `src/update.rs`, channel machinery, and product
+announcements. PR #17 uses Vimeflow discovery names and installs to
+`~/.local/bin/vimeflow`, leaving upstream binaries intact. Every provisioning
+source, including hosted assets, must report the matching Vimeflow banner and
+protocol on the remote host before it can replace the installed fork binary.
+Incompatible sources fail with a diagnostic directing users to
+`HERDR_REMOTE_BINARY`; no fork-hosted release system is provided.

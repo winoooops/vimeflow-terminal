@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use crate::api::schema::{Method, NotificationShowParams, NotificationShowSound, Request};
 use crate::config::ToastHerdrPosition;
 
@@ -25,7 +26,7 @@ fn notification_show(args: &[String]) -> std::io::Result<i32> {
         Ok(params) => params,
         Err(NotificationShowArgError::Usage) => {
             eprintln!(
-                "usage: herdr notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right] [--sound none|done|request]"
+                "usage: vimeflow notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right] [--sound none|done|request]"
             );
             return Ok(2);
         }

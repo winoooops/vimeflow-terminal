@@ -57,7 +57,7 @@ rustPlatform.buildRustPackage {
   cargoLock = {
     lockFile = ../Cargo.lock;
     outputHashes = {
-      "herdr-agent-watcher-0.2.4" = "sha256-aapLVvJXlkm/fLgRJ3HUugbP+GGxsSgpsRm7SoDaFjA=";
+      "herdr-agent-watcher-0.2.8" = "sha256-WFXSHLQ8xFCUydSmAORSAfVoSP+n3aXeM5Ri7cq6ajs=";
     };
   };
 
@@ -87,7 +87,7 @@ rustPlatform.buildRustPackage {
     description = "Terminal workspace manager for AI coding agents";
     homepage = "https://herdr.dev";
     license = lib.licenses.asl20;
-    mainProgram = "herdr";
+    mainProgram = "vimeflow";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;
   };
 }
