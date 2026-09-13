@@ -17,6 +17,7 @@ Modified upstream files
 - .github/workflows/release.yml
 - AGENTS.md (CLAUDE.md is a symlink to it)
 - README.md
+- README.zh-CN.md
 - Cargo.toml
 - Cargo.lock
 - docs/next/website/src/content/docs/agents.mdx
@@ -141,6 +142,7 @@ Fork-added files
 - src/app/input/trace.rs
 - src/ui/island.rs
 - src/title_sync/
+- README.ja.md
 
 Removed upstream paths
 ----------------------

@@ -192,8 +192,9 @@ the top of the file:
 | `src/app/state.rs` | Keep Agents commands in the ASCII input-source realm. Track title-sync generations, live Agents-card, compact-rail, tab-island presentation and notification state, toast activation and delayed-delivery metadata, hit geometry, and non-blocking watcher telemetry snapshots. | `e006a1ea`, `b8a6406c`, `95a7db2a`, compact-rail numbers, compact-rail agent marks (this commit), dynamic island capsule (this commit), island motion (this commit), island notifications (this commit), island notification arrivals (this commit), island notification bell (this commit), island notification panel (this commit), island notification single-client follow-up (this commit) |
 | `src/app/runtime.rs` | Tick island springs, include their deadline in the monolithic run-loop scheduler, and repaint/capture panel mouse input. | island motion (this commit), island notification panel (this commit), island panel geometry reconciliation (this commit) |
 | `src/app/popup.rs` | Keep popup panes and the island notification panel mutually exclusive while restoring the host input source on popup open. | island notification popup exclusion (this commit) |
-| `README.md` | Replace upstream's product README with fork framing: try-herdr-first redirect, the opinionated-layer scope, shipped/upcoming features, build-from-source instructions, tracking-fork model, and attribution. Upstream's sponsor block, download/stars badges, demo video, and logo are dropped; a sponsor-herdr credit line is kept. | PR #2 |
-| `AGENTS.md` | Add the fork-overrides section (branch model, fork CI, disabled upstream workflows), fork command reference, and architecture map. `CLAUDE.md` remains a symlink to it. | PR #2 |
+| `README.md` | Replace upstream's product README with fork framing: try-herdr-first redirect, the opinionated-layer scope, shipped/upcoming features (now including the tab island and compact-rail agent marks), build-from-source instructions, tracking-fork model, attribution, and links to the zh-CN and ja translations. Upstream's sponsor block, download/stars badges, demo video, and logo are dropped; a sponsor-herdr credit line is kept. | PR #2, island and rail features (this commit) |
+| `README.zh-CN.md` | Replace upstream's Chinese README, which described herdr and embedded the removed logo, with a translation of the fork README so the Chinese entry point describes vimeflow. | fork README translations (this commit) |
+| `AGENTS.md` | Fork-only agent guidance: upstream's text is no longer carried. The file points at upstream's `AGENTS.md` and docs, keeps a short digest of the universal rules that still bind, and documents the fork's branch model, naming, commands, and architecture. `CLAUDE.md` remains a symlink to it. | PR #2, fork-only rewrite (this commit) |
 | `.github/workflows/issue-gate.yml` | Keep upstream issue-template enforcement from closing or editing issues in the fork. | PR #8 |
 | `.github/workflows/release.yml` | Keep upstream release publishing and issue-closing jobs from running in the fork. | PR #8 |
 | `.github/workflows/preview.yml` | Keep upstream preview publishing from running in the fork. | PR #8 |
@@ -289,7 +290,9 @@ For each upstream release:
 3. Compare changed upstream paths with the registry above. Resolve conflicts
    and registered deletions explicitly, retain the in-file notice on every
    fork-modified upstream source file, and update both registries and
-   `MODIFICATIONS` in the same PR.
+   `MODIFICATIONS` in the same PR. `AGENTS.md` carries no upstream text: take
+   `main`'s side and fold any change to upstream's universal rules into its
+   digest.
 4. Run the macOS/Linux build-and-test matrix and review the complete diff.
 5. Merge the sync PR into `main`; never auto-resolve conflicts or commit fork
    work directly to `master`.

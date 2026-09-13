@@ -12,6 +12,10 @@
 </p>
 
 <p align="center">
+  English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-666666?labelColor=333333" alt="Apache 2.0 license" /></a>
 </p>
 
@@ -37,8 +41,9 @@ opinionated layer described below.
 
 ## what this fork is
 
-Vimeflow was an Electron desktop app for coding agents. In August 2026 it
-pivoted to terminal-native, rebuilt as a **tracking fork of herdr v0.8.0**.
+[Vimeflow](https://github.com/winoooops/vimeflow) was an Electron desktop app
+for coding agents. In August 2026 it pivoted to terminal-native, rebuilt as a
+**tracking fork of herdr v0.8.0**.
 
 The split of labor is deliberate:
 
@@ -73,7 +78,7 @@ Everything herdr v0.8.0 does, plus:
   one implementation of what a card looks like, not two. Configurable live:
 
   ```toml
-  [ui]
+  [ui.sidebar]
   agents_view = "cards"    # or "legacy" for herdr's row list
   agents_hide_idle = false
   ```
@@ -86,16 +91,48 @@ Everything herdr v0.8.0 does, plus:
   walking a long list never throws the main view around. Mouse works
   throughout: click a trace row to select it, click again to open it.
 
-- **no phone-home** — self-update, hosted manifest fetches, and product
-  announcements are deliberately disabled. This fork will never install stock
-  herdr over itself.
+- **tab island** — the tab bar is a capsule: the active tab is a pill carrying
+  its title, the other tabs are dots (or numbers, or labels), and switching
+  tabs is spring-animated. A background agent that finishes or gets blocked
+  leaves a notification record; the capsule then shows a bell with the unread
+  count, and `prefix+i` (or a click on the bell) opens a panel where Enter
+  jumps to the record's workspace, tab, and pane, `r` marks everything read,
+  and `c` clears. Toasts anchor on the capsule. Every setting reloads live, and
+  `ui.tab_bar_style = "classic"` restores herdr's tab bar.
 
-The native features above are **Unix-only** (macOS and Linux). Windows builds
-the upstream feature set.
+  ```toml
+  [ui.island]
+  position = "center"     # or "left"
+  display = "dots"        # or "numbers", "labels"
+  arrivals = "toast"      # or "silent" to collect records quietly
+  bell = "🔔"             # "!" for ASCII; any one- or two-cell glyph works
+  ```
+
+- **compact-rail agent marks** — when the sidebar is collapsed to its narrow
+  rail, each row carries a two-cell mark for the agent running in that pane,
+  so a glance at the rail says who lives where. `compact_rail_numbers` and
+  `compact_rail_leading` control what leads each row, and
+  `[ui.sidebar.compact_rail_marks]` overrides the mark per agent:
+
+  ```toml
+  [ui.sidebar]
+  compact_rail_leading = "agent"
+  compact_rail_numbers = true          # workspace-row numbering in agent mode
+  [ui.sidebar.compact_rail_marks]
+  claude = "Cl"                        # override one agent's mark
+  ```
+
+- **binary self-update disabled** — binary self-update and product
+  announcements are deliberately disabled. This fork will never install stock
+  herdr over itself. Agent-detection manifest updates from herdr.dev remain
+  enabled by default in normal release-build sessions; set
+  `update.manifest_check = false` in `config.toml` to opt out.
+
+The agent watcher, automatic titles, cards, and keyboard navigation are
+**Unix-only** (macOS and Linux); compact-rail agent marks and the tab island
+build on every platform. Beyond that, Windows builds the upstream feature set.
 
 ## what's coming
-
-No dates. Roughly in order:
 
 - **pane cards and the worktree flow** — card-style pane headers with agent
   glyph, state, and worktree badge; and *"new agent pane in a fresh worktree"*
