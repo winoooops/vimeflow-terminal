@@ -127,8 +127,8 @@ Everything herdr v0.8.0 does, plus:
   herdr over itself.
 
 The agent watcher, automatic titles, cards, and keyboard navigation are
-**Unix-only** (macOS and Linux); the tab island builds on every platform.
-Beyond that, Windows builds the upstream feature set.
+**Unix-only** (macOS and Linux); compact-rail agent marks and the tab island
+build on every platform. Beyond that, Windows builds the upstream feature set.
 
 ## what's coming
 

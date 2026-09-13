@@ -178,8 +178,10 @@ emulation is the vendored `libghostty-vt` wrapped by `src/ghostty/`; agent
 detection is `src/detect/`; persistence and live handoff are `src/persist/`
 and `src/server/handoff.rs`.
 
-Fork-added subsystems. All but the tab island are `#[cfg(unix)]`; Windows
-builds the upstream feature set, which is what `just windows-lint` guards.
+Fork-added subsystems. The embedded watcher, watcher-backed cards and agent
+navigation, and title sync are `#[cfg(unix)]`. Compact-rail agent marks and the
+tab island are cross-platform; Windows builds these alongside the upstream
+feature set, which is what `just windows-lint` guards.
 
 - **Embedded agent watcher.** `src/server/headless/embedded_watcher.rs` starts
   `herdr-agent-watcher` (a git dependency pinned by tag in `Cargo.toml`) inside
