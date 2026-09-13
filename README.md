@@ -116,7 +116,8 @@ Everything herdr v0.8.0 does, plus:
 
   ```toml
   [ui.sidebar]
-  compact_rail_numbers = true          # pane numbers on the rail
+  compact_rail_leading = "agent"
+  compact_rail_numbers = true          # workspace-row numbering in agent mode
   [ui.sidebar.compact_rail_marks]
   claude = "Cl"                        # override one agent's mark
   ```

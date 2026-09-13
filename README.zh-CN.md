@@ -104,7 +104,8 @@ herdr v0.8.0 的全部功能，加上：
 
   ```toml
   [ui.sidebar]
-  compact_rail_numbers = true          # 在窄栏上显示 pane 编号
+  compact_rail_leading = "agent"
+  compact_rail_numbers = true          # agent 模式下控制 workspace 行编号
   [ui.sidebar.compact_rail_marks]
   claude = "Cl"                        # 覆盖某个智能体的标记
   ```
@@ -207,12 +208,16 @@ vimeflow server stop && vimeflow      # 重启以生效
 
 ### 不附加地运行服务端
 
-`vimeflow` 会启动一个服务端并附加上去。要在不丢失终端的情况下重启服务端，先
-停掉它——这会杀掉该会话里的所有 pane：
+要启动服务端而不附加 TUI，请运行：
+
+```bash
+vimeflow server
+```
+
+只有需要停止现有服务端时才运行以下命令；它会终止该会话中的所有 pane：
 
 ```bash
 vimeflow server stop
-vimeflow
 ```
 
 ### 测试

@@ -121,7 +121,8 @@ herdr v0.8.0 のすべてに加えて:
 
   ```toml
   [ui.sidebar]
-  compact_rail_numbers = true          # レールに pane 番号を表示
+  compact_rail_leading = "agent"
+  compact_rail_numbers = true          # agent モードでは workspace 行の番号を制御
   [ui.sidebar.compact_rail_marks]
   claude = "Cl"                        # 特定エージェントのマークを上書き
   ```
@@ -244,13 +245,17 @@ vimeflow がそれを組み込みの Agents サイドバーに振り向けます
 
 ### アタッチせずにサーバーを動かす
 
-`vimeflow` はサーバーを起動してアタッチします。ターミナルを失わずにサーバーを
-再起動するには、先に停止します。これはそのセッションのすべての pane を終了させ
-ます:
+TUI をアタッチせずにサーバーを起動するには、次を実行します:
+
+```bash
+vimeflow server
+```
+
+既存のサーバーを停止する必要がある場合にのみ、次を実行してください。
+そのセッションのすべての pane が終了します:
 
 ```bash
 vimeflow server stop
-vimeflow
 ```
 
 ### テスト
