@@ -66,16 +66,21 @@ and the reasoning.
   untracked `.claude/worktrees/`, not `../herdr-worktrees/`.
 - Fork CI is `.github/workflows/fork-ci.yml`: a `REMOVED_PATHS` reappearance
   guard, then `cargo build --locked` + `cargo nextest run --locked` on Linux
-  and macOS for pushes and PRs to `main`. The other workflows are upstream's
-  and are gated to the `herdrdev/herdr` repository, so they never run here.
+  and macOS for pushes and PRs to `main`. The inherited
+  `.github/workflows/ci.yml` also runs on fork PRs: PR-title validation,
+  Linux/macOS/Windows checks, and Windows ConPTY packaging. The remaining
+  upstream workflows have repository guards and do not run here.
 - Editing an upstream file requires the Apache 4(b) notice comment at the top
   of that file plus a row in the `FORK.md` registry and `MODIFICATIONS`. New
   fork-only files go in the "Fork-added files" list. Never recreate a path
   listed in `REMOVED_PATHS`; if upstream grows a real dependency under one,
   narrow the registry in its own reviewed PR.
-- Self-update, hosted manifest fetches, and product announcements are
+- Binary self-update and product announcements are
   deliberately neutralized (`src/update.rs`, `src/product_announcements.rs`).
-  Do not re-enable them.
+  Do not re-enable them. Agent-detection manifest updates from herdr.dev
+  (`src/detect/manifest_update.rs`) remain enabled by default in normal
+  release-build sessions; set `update.manifest_check = false` in `config.toml`
+  to opt out.
 - Fork specs, plans, and reviews are tracked in `docs/vimeflow/`, not the
   ignored `.local/prd/`. Upstream's `docs/next/` staging still applies to
   user-facing changes, and fork settings are documented there too. The preview

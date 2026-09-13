@@ -122,9 +122,11 @@ Everything herdr v0.8.0 does, plus:
   claude = "Cl"                        # override one agent's mark
   ```
 
-- **no phone-home** — self-update, hosted manifest fetches, and product
+- **binary self-update disabled** — binary self-update and product
   announcements are deliberately disabled. This fork will never install stock
-  herdr over itself.
+  herdr over itself. Agent-detection manifest updates from herdr.dev remain
+  enabled by default in normal release-build sessions; set
+  `update.manifest_check = false` in `config.toml` to opt out.
 
 The agent watcher, automatic titles, cards, and keyboard navigation are
 **Unix-only** (macOS and Linux); compact-rail agent marks and the tab island
