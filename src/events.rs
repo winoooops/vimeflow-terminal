@@ -55,7 +55,6 @@ pub struct WorktreeRemoveResult {
 /// An event from a background task to the main loop.
 #[derive(Debug)]
 pub enum AppEvent {
-    #[cfg(unix)]
     /// Blocking native title resolution completed for a coalesced pane snapshot.
     TitleSyncResolved {
         generation: u64,

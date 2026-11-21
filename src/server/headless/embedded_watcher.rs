@@ -91,8 +91,7 @@ fn log_unexpected_exit(result: std::thread::Result<i32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixListener;
+    use std::io::Write;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
@@ -111,24 +110,32 @@ mod tests {
             std::fs::create_dir_all(&config).expect("config directory");
             std::fs::write(config.join("config.toml"), "[daemon]\ninterval_ms = 25\n")
                 .expect("daemon config");
-            let listener = UnixListener::bind(&socket).expect("fake Herdr socket");
-            listener.set_nonblocking(true).expect("nonblocking socket");
+            let listener = crate::ipc::bind_local_listener(&socket).expect("fake Herdr socket");
+            {
+                use interprocess::local_socket::ListenerNonblockingMode;
+                use interprocess::local_socket::traits::Listener as _;
+                listener.set_nonblocking(ListenerNonblockingMode::Accept).expect("nonblocking socket");
+            }
             let stop = Arc::new(AtomicBool::new(false));
             let thread_stop = stop.clone();
             let thread = std::thread::spawn(move || {
+                use interprocess::local_socket::traits::Listener as _;
                 while !thread_stop.load(Ordering::Relaxed) {
                     match listener.accept() {
-                        Ok((stream, _)) => {
+                        Ok(mut stream) => {
+                            // Read request line byte-at-a-time (avoids try_clone)
                             let mut request = String::new();
-                            if BufReader::new(stream.try_clone().expect("clone stream"))
-                                .read_line(&mut request)
-                                .is_err()
-                            {
-                                continue;
+                            loop {
+                                let mut byte = [0u8; 1];
+                                if std::io::Read::read_exact(&mut stream, &mut byte).is_err() {
+                                    break;
+                                }
+                                request.push(byte[0] as char);
+                                if byte[0] == b'\n' { break; }
                             }
+                            if request.is_empty() { continue; }
                             let request: serde_json::Value =
                                 serde_json::from_str(&request).expect("request JSON");
-                            let mut stream = stream;
                             let response = serde_json::json!({
                                 "id": request["id"],
                                 "result": { "panes": [] },

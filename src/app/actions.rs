@@ -3107,7 +3107,6 @@ impl AppState {
             AppEvent::WorktreeAddFinished(_) => Vec::new(),
             AppEvent::WorktreeRemoveFinished(_) => Vec::new(),
             AppEvent::PluginCommandFinished { .. } => Vec::new(),
-            #[cfg(unix)]
             AppEvent::TitleSyncResolved { .. } => Vec::new(),
         }
     }

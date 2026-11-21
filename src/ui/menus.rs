@@ -295,10 +295,7 @@ pub(super) fn render_trace_overlay(app: &AppState, frame: &mut Frame, area: Rect
         .bg(app.palette.mauve)
         .add_modifier(Modifier::BOLD);
 
-    #[cfg(unix)]
     let reading = app.agent_trace_panel.is_some();
-    #[cfg(not(unix))]
-    let reading = false;
 
     // The footer doubles as the zone indicator: it speaks the active zone's
     // dialect, so `h` always reads as one level up from wherever you are.
@@ -348,12 +345,10 @@ pub(super) fn render_trace_overlay(app: &AppState, frame: &mut Frame, area: Rect
 /// watcher's `line_count` wraps at this width, and feeding it the unclamped
 /// frame width would undercount wrapped lines and strand the tail of a long
 /// args preview.
-#[cfg(unix)]
 pub(crate) fn trace_panel_width(area: Rect) -> u16 {
     area.width.saturating_sub(4).min(60)
 }
 
-#[cfg(unix)]
 pub(super) fn render_trace_detail(app: &AppState, frame: &mut Frame, area: Rect) {
     use herdr_agent_watcher::sidebar::dialog;
 

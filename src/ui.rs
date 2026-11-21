@@ -31,9 +31,7 @@ use self::dialogs::{
 pub(crate) use self::island::island_animation_for_tab_change;
 use self::island::{compute_island_panel_view, render_island_panel};
 use self::keybind_help::render_keybind_help_overlay;
-#[cfg(unix)]
 use self::menus::render_trace_detail;
-#[cfg(unix)]
 pub(crate) use self::menus::trace_panel_width;
 use self::menus::{
     render_context_menu, render_copy_mode_overlay, render_global_launcher_menu,
@@ -60,7 +58,6 @@ pub(crate) use self::scrollbar::{
     scrollbar_offset_from_row, scrollbar_thumb_grab_offset, should_show_scrollbar,
 };
 use self::settings::render_settings_overlay;
-#[cfg(unix)]
 pub(crate) use self::sidebar::agent_card_trace_spans;
 #[cfg(test)]
 pub(crate) use self::sidebar::agent_panel_body_rect;

@@ -956,13 +956,13 @@ dependencies = [
 
 [[package]]
 name = "herdr-agent-watcher"
-version = "0.2.8"
-source = "git+https://github.com/winoooops/herdr-agent-watcher?tag=v0.2.8#49ab194f027f55016960be8ae69740612c0a0c5a"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "crossterm",
  "dirs",
  "env_logger",
+ "interprocess",
  "libc",
  "log",
  "notify",
@@ -983,6 +983,7 @@ dependencies = [
  "toml_edit",
  "unicode-width",
  "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

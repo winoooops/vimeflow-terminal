@@ -56,13 +56,11 @@ fn set_host_color_scheme_reports(enabled: bool) -> io::Result<()> {
     io::stdout().flush()
 }
 
-#[cfg(unix)]
 mod agent_cards;
 mod agent_resume;
 mod api;
 mod app;
 mod build_info;
-#[cfg(not(windows))]
 mod checksum;
 mod cli;
 mod client;
@@ -101,7 +99,6 @@ mod terminal;
 mod terminal_modes;
 mod terminal_notify;
 mod terminal_theme;
-#[cfg(unix)]
 mod title_sync;
 mod ui;
 mod update;

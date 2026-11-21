@@ -65,7 +65,6 @@ use crate::server::socket_paths::{
 };
 use crate::server::terminal_attach::paste_payload_for_runtime;
 
-#[cfg(unix)]
 mod embedded_watcher;
 mod pane_graphics;
 
@@ -340,11 +339,8 @@ pub struct HeadlessServer {
     server_event_rx: mpsc::Receiver<ServerEvent>,
     /// Sender for server events (cloned for each client thread).
     server_event_tx: mpsc::Sender<ServerEvent>,
-    #[cfg(unix)]
     agent_watcher: embedded_watcher::EmbeddedWatcher,
-    #[cfg(unix)]
     agent_telemetry: crate::agent_cards::telemetry::TelemetryIngest,
-    #[cfg(unix)]
     title_sync: crate::title_sync::TitleSyncEngine,
 }
 
@@ -482,7 +478,6 @@ impl HeadlessServer {
         title_sync_enabled: bool,
         title_sync_interval: Duration,
     ) -> io::Result<Self> {
-        #[cfg(unix)]
         for warning in crate::cli::watcher::coexistence_warnings(
             agent_watcher_enabled,
             title_sync_enabled,
@@ -518,11 +513,6 @@ impl HeadlessServer {
             server_config_diagnostic_summaries(config_diagnostics);
         #[cfg(not(unix))]
         let _ = api_tx;
-        #[cfg(not(unix))]
-        let _ = agent_watcher_enabled;
-        #[cfg(not(unix))]
-        let _ = (title_sync_enabled, title_sync_interval);
-        #[cfg(unix)]
         let title_sync = crate::title_sync::TitleSyncEngine::start(
             title_sync_enabled,
             title_sync_interval,
@@ -557,16 +547,13 @@ impl HeadlessServer {
             should_quit,
             server_event_rx,
             server_event_tx,
-            #[cfg(unix)]
             agent_watcher: embedded_watcher::EmbeddedWatcher::start(agent_watcher_enabled),
-            #[cfg(unix)]
             agent_telemetry: crate::agent_cards::telemetry::TelemetryIngest::start(
                 herdr_agent_watcher::daemon::DaemonOptions::new(
                     crate::plugin_paths::plugin_state_dir("herdr-agent-watcher"),
                 )
                 .state_socket_path(),
             ),
-            #[cfg(unix)]
             title_sync,
         })
     }
@@ -692,9 +679,7 @@ impl HeadlessServer {
 
             // 6. Handle scheduled tasks.
             let now = Instant::now();
-            #[cfg(unix)]
             self.agent_watcher.poll(now);
-            #[cfg(unix)]
             if self
                 .agent_telemetry
                 .poll(&mut self.app.state.agent_telemetry)
@@ -702,7 +687,6 @@ impl HeadlessServer {
                 needs_render = true;
                 needs_full_render = true;
             }
-            #[cfg(unix)]
             self.title_sync.poll(&self.app, now);
             if self.handle_scheduled_tasks_headless(now, needs_render) {
                 needs_render = true;
@@ -2204,7 +2188,6 @@ impl HeadlessServer {
     /// Returns true if the event changed visual state (requiring a re-render).
     fn handle_internal_event_with_forwarding(&mut self, ev: AppEvent) -> bool {
         let changed = match &ev {
-            #[cfg(unix)]
             AppEvent::TitleSyncResolved { .. } => {
                 let AppEvent::TitleSyncResolved { generation, panes } = ev else {
                     unreachable!("matched title-sync event")
@@ -4795,7 +4778,6 @@ fn is_keybinding_config_diagnostic(diagnostic: &str) -> bool {
 pub fn run_server() -> io::Result<()> {
     init_logging();
     crate::platform::raise_server_nofile_limit();
-    #[cfg(unix)]
     announce_api_socket_to_embedded_watcher();
 
     let args: Vec<String> = std::env::args().collect();
@@ -5039,7 +5021,6 @@ fn run_handoff_import_server(_socket_path: &Path, _token: &str) -> io::Result<()
 /// With both unset, the derived client socket is byte-identical to the session
 /// default that would otherwise be used, so this is a no-op for herdr and only
 /// tells the watcher where to look.
-#[cfg(unix)]
 fn announce_api_socket_to_embedded_watcher() {
     if std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR).is_some()
         || std::env::var_os(crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR).is_some()
@@ -5216,7 +5197,6 @@ mod tests {
         #[cfg(windows)]
         spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone());
         let server_keybindings = app_keybindings(&app);
-        #[cfg(unix)]
         let title_sync = crate::title_sync::TitleSyncEngine::disabled(app.event_tx.clone());
 
         HeadlessServer {
@@ -5251,11 +5231,8 @@ mod tests {
             should_quit,
             server_event_rx,
             server_event_tx,
-            #[cfg(unix)]
             agent_watcher: embedded_watcher::EmbeddedWatcher::disabled(),
-            #[cfg(unix)]
             agent_telemetry: crate::agent_cards::telemetry::TelemetryIngest::disabled(),
-            #[cfg(unix)]
             title_sync,
         }
     }

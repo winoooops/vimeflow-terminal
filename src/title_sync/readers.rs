@@ -208,6 +208,7 @@ fn home_root(env_name: &str, suffix: &str) -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| {
             std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
                 .map(PathBuf::from)
                 .map(|home| home.join(suffix))
         })
@@ -243,6 +244,7 @@ fn find_opencode_database_with(cache: &Mutex<Option<PathBuf>>, command: &Path) -
             .map(PathBuf::from)
             .or_else(|| {
                 std::env::var_os("HOME")
+                    .or_else(|| std::env::var_os("USERPROFILE"))
                     .map(PathBuf::from)
                     .map(|home| home.join(".local/share"))
             })
@@ -269,7 +271,7 @@ pub(super) mod tests_support {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::title_sync::ProcessInput;

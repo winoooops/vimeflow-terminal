@@ -414,7 +414,6 @@ impl App {
             }
             NavigateAction::IslandPanelToggle => self.state.toggle_island_panel(),
             NavigateAction::FocusAgents => {
-                #[cfg(unix)]
                 self.state.enter_agents_mode();
                 if self.state.mode == Mode::Navigate {
                     leave_navigate_mode(&mut self.state);
@@ -1790,7 +1789,6 @@ pub(super) fn execute_navigate_action_in_context(
             state.toggle_island_panel();
         }
         NavigateAction::FocusAgents => {
-            #[cfg(unix)]
             state.enter_agents_mode();
             if state.mode == Mode::Navigate {
                 leave_navigate_mode(state);

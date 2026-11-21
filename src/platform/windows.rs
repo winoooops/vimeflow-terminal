@@ -22,7 +22,9 @@ use windows_sys::{
         Globalization::{CompareStringOrdinal, CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN},
         System::{
             Console::GetConsoleWindow,
-            DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+            DataExchange::{
+                CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+            },
             Diagnostics::{
                 Debug::ReadProcessMemory,
                 ToolHelp::{
@@ -1159,6 +1161,17 @@ pub fn signal_processes(pids: &[u32], signal: Signal) {
     }
 }
 
+pub fn process_agent_hint(pid: u32) -> Option<crate::detect::Agent> {
+    if pid == 0 {
+        return None;
+    }
+    let process = ProcessHandle::open(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)?;
+    let parameters = read_process_parameters(process.0)?;
+    let environment = read_process_environment(process.0, parameters.environment)?;
+    let value = environment_variable_from_utf16(&environment, "HERDR_AGENT")?;
+    crate::detect::parse_agent_label(&value)
+}
+
 pub fn process_exists(pid: u32) -> bool {
     let Some(process) = ProcessHandle::open(pid, PROCESS_QUERY_LIMITED_INFORMATION) else {
         return false;
@@ -1216,7 +1229,33 @@ pub fn write_clipboard(bytes: &[u8]) -> bool {
 }
 
 pub fn read_clipboard_text() -> Option<String> {
-    None
+    unsafe {
+        let owner = GetConsoleWindow();
+        if OpenClipboard(owner) == 0 {
+            return None;
+        }
+        let _clipboard = ClipboardGuard;
+
+        let handle = GetClipboardData(CF_UNICODETEXT as u32);
+        if handle.is_null() {
+            return None;
+        }
+
+        let locked = GlobalLock(handle);
+        if locked.is_null() {
+            return None;
+        }
+
+        let ptr = locked.cast::<u16>();
+        let mut len = 0;
+        while *ptr.add(len) != 0 {
+            len += 1;
+        }
+        let text = String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len));
+        GlobalUnlock(handle);
+
+        Some(text)
+    }
 }
 
 pub fn open_url(url: &str) -> std::io::Result<()> {

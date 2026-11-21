@@ -40,6 +40,7 @@ pub(crate) struct Ownership {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RenameDecision {
+    Adopt,
     Clear,
     Manual,
     Noop,
@@ -75,6 +76,9 @@ pub(crate) fn rename_decision(
 ) -> RenameDecision {
     let current = sanitize_title(pane.label.as_deref(), 200);
     if current.is_some() && previous.map(|state| state.title.as_str()) != current.as_deref() {
+        if previous.is_none() {
+            return RenameDecision::Adopt;
+        }
         return RenameDecision::Manual;
     }
     if desired_title.is_none()
@@ -192,10 +196,20 @@ mod tests {
     fn rename_policy_matches_the_pinned_typescript_table() {
         let cases = [
             (
-                "manual labels win",
+                "unowned labels are adopted",
                 pane(Some("codex"), Some("session-1"), Some("manual")),
                 Some("Generated"),
                 None,
+                RenameDecision::Adopt,
+            ),
+            (
+                "owned manual labels win",
+                pane(Some("codex"), Some("session-1"), Some("manual")),
+                Some("Generated"),
+                Some(Ownership {
+                    session: Some("codex:id:session-1".into()),
+                    title: "Previous".into(),
+                }),
                 RenameDecision::Manual,
             ),
             (

@@ -1,9 +1,6 @@
-#[cfg(unix)]
 const WATCHER_PLUGIN_ID: &str = "herdr-agent-watcher";
-#[cfg(unix)]
 const TITLE_SYNC_PLUGIN_ID: &str = "herdr-agent-title-sync";
 
-#[cfg(unix)]
 pub(crate) fn coexistence_warnings<'a>(
     watcher_enabled: bool,
     title_sync_enabled: bool,
@@ -24,13 +21,10 @@ pub(crate) fn coexistence_warnings<'a>(
     warnings
 }
 
-#[cfg(unix)]
 mod platform {
     use std::collections::BTreeMap;
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
     use std::path::{Path, PathBuf};
-    use std::time::Duration;
 
     use herdr_agent_watcher::daemon::state_wire::Hello;
 
@@ -98,12 +92,17 @@ mod platform {
     }
 
     fn read_snapshot(socket: &Path) -> std::io::Result<Hello> {
-        let mut stream = UnixStream::connect(socket)?;
-        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+        let mut stream = crate::ipc::connect_local_stream(socket)?;
+        #[cfg(unix)]
+        {
+            use std::time::Duration;
+            use interprocess::local_socket::traits::Stream as _;
+            stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+        }
         stream.write_all(b"{\"method\":\"snapshot\"}\n")?;
         let mut line = String::new();
-        BufReader::new(stream).read_line(&mut line)?;
+        BufReader::new(&mut stream).read_line(&mut line)?;
         serde_json::from_str(&line).map_err(std::io::Error::other)
     }
 
@@ -216,14 +215,5 @@ mod platform {
 }
 
 pub(super) fn run_watcher_command(args: &[String]) -> std::io::Result<i32> {
-    #[cfg(unix)]
-    {
-        platform::run(args)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = args;
-        eprintln!("watcher commands are unsupported on this platform");
-        Ok(1)
-    }
+    platform::run(args)
 }

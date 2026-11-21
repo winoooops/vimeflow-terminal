@@ -48,15 +48,7 @@ mod selection;
 mod settings;
 mod sidebar;
 mod terminal;
-#[cfg(unix)]
 mod trace;
-
-/// The agent watcher is a Unix-only dependency, so trace navigation cannot be
-/// entered on Windows. `Mode::Agents` still exists for the shared match arms.
-#[cfg(not(unix))]
-impl App {
-    pub(crate) fn handle_trace_key(&mut self, _key: crate::input::TerminalKey) {}
-}
 
 pub(crate) use self::{
     lease::{ConsumedInputLease, ForwardedInputLease, InputLeaseKey, InputLeaseTable, RepeatPlan},

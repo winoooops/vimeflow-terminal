@@ -1665,9 +1665,6 @@ pub struct AppState {
     /// move pane focus: walking the list would otherwise switch workspace and
     /// tab on every keystroke and throw the main view around.
     ///
-    /// Read only on Unix, where the agent cards exist. Kept unconditional so
-    /// `AppState`'s shape does not diverge by platform.
-    #[cfg_attr(not(unix), allow(dead_code))]
     pub agent_card_cursor: Option<PaneId>,
     /// Selected trace row as `(anchor pane, toolUseId)`. The id is the ring's
     /// own stable key; a row index would silently retarget as calls push in.
@@ -1675,9 +1672,7 @@ pub struct AppState {
     pub agent_trace_focus: Option<(PaneId, String)>,
     /// Open trace detail panel. Holds a snapshot taken at open, so a call
     /// falling off the ring never mutates text under a reading user.
-    #[cfg(unix)]
     pub agent_trace_panel: Option<herdr_agent_watcher::sidebar::dialog::Panel>,
-    #[cfg(unix)]
     pub agent_telemetry:
         std::collections::HashMap<String, herdr_agent_watcher::daemon::store::PaneTelemetry>,
     /// Transient session-wide projection override for the built-in Agents view.
@@ -2078,9 +2073,7 @@ impl AppState {
             agent_card_collapsed_for: None,
             agent_card_cursor: None,
             agent_trace_focus: None,
-            #[cfg(unix)]
             agent_trace_panel: None,
-            #[cfg(unix)]
             agent_telemetry: std::collections::HashMap::new(),
             agent_view_override: None,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),

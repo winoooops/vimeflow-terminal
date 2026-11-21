@@ -114,7 +114,6 @@ fn run(socket: PathBuf, latest: &Mutex<Option<CacheUpdate>>, shutdown: &AtomicBo
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixListener;
     use std::time::Instant;
 
     use super::*;
@@ -158,16 +157,21 @@ mod tests {
     }
 
     fn serve(
-        listener: UnixListener,
+        listener: crate::ipc::LocalListener,
         line: &'static str,
     ) -> (std::thread::JoinHandle<()>, std::sync::mpsc::Sender<()>) {
+        use interprocess::local_socket::traits::Listener as _;
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept subscriber");
+            let mut stream = listener.accept().expect("accept subscriber");
             let mut request = String::new();
-            BufReader::new(stream.try_clone().expect("clone stream"))
-                .read_line(&mut request)
-                .expect("read subscribe");
+            // Read byte-at-a-time to avoid needing try_clone (not available on Windows named pipes)
+            loop {
+                let mut byte = [0u8; 1];
+                std::io::Read::read_exact(&mut stream, &mut byte).expect("read byte");
+                request.push(byte[0] as char);
+                if byte[0] == b'\n' { break; }
+            }
             assert_eq!(request, "{\"method\":\"subscribe\"}\n");
             stream.write_all(line.as_bytes()).expect("write snapshot");
             let _ = release_rx.recv_timeout(Duration::from_secs(5));
@@ -179,7 +183,7 @@ mod tests {
     fn updates_land_in_the_non_blocking_cache() {
         let dir = TestDir::new();
         let socket = dir.path().join("state.sock");
-        let listener = UnixListener::bind(&socket).expect("bind socket");
+        let listener = crate::ipc::bind_local_listener(&socket).expect("bind socket");
         let (server, release) = serve(
             listener,
             "{\"version\":2,\"seq\":1,\"panes\":{\"w1:p1\":{\"agent\":\"claude\",\"card_state\":\"running\"}}}\n",
@@ -210,7 +214,7 @@ mod tests {
     fn reconnect_after_restart_replaces_the_cleared_cache() {
         let dir = TestDir::new();
         let socket = dir.path().join("state.sock");
-        let first_listener = UnixListener::bind(&socket).expect("bind first socket");
+        let first_listener = crate::ipc::bind_local_listener(&socket).expect("bind first socket");
         let (first, release_first) = serve(
             first_listener,
             "{\"version\":2,\"seq\":1,\"panes\":{\"w1:p1\":{\"agent\":\"claude\"}}}\n",
@@ -227,7 +231,7 @@ mod tests {
         });
 
         std::fs::remove_file(&socket).expect("remove old socket");
-        let second_listener = UnixListener::bind(&socket).expect("bind second socket");
+        let second_listener = crate::ipc::bind_local_listener(&socket).expect("bind second socket");
         let (second, release_second) = serve(
             second_listener,
             "{\"version\":2,\"seq\":2,\"panes\":{\"w1:p2\":{\"agent\":\"codex\"}}}\n",

@@ -26,7 +26,6 @@ pub mod state;
 mod terminal_targets;
 mod terminal_titles;
 mod theme_sync;
-#[cfg(unix)]
 mod title_sync;
 mod worktrees;
 
@@ -680,9 +679,7 @@ impl App {
             agent_card_collapsed_for: None,
             agent_card_cursor: None,
             agent_trace_focus: None,
-            #[cfg(unix)]
             agent_trace_panel: None,
-            #[cfg(unix)]
             agent_telemetry: std::collections::HashMap::new(),
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
@@ -958,7 +955,6 @@ impl App {
 
     /// Reconcile shared panel state only after computing the foreground client's geometry.
     pub(crate) fn reconcile_panels_from_foreground_view(&mut self) {
-        #[cfg(unix)]
         self.state.reconcile_trace_visibility();
         if self.state.island_panel_open
             && (self.state.view.island_panel_hit_area.width == 0

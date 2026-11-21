@@ -131,7 +131,6 @@ fn agent_panel_entries_with_runtimes(
 ) -> Vec<AgentPanelEntry> {
     let mut entries = collect_agent_panel_entries_with_runtimes(app, terminal_runtimes);
     crate::app::agent_view::apply_agent_view(app, &mut entries);
-    #[cfg(unix)]
     if app.agents_view == crate::config::AgentsViewConfig::Cards && app.agents_hide_idle {
         entries.retain(|entry| entry.state != AgentState::Idle || !entry.seen);
     }
@@ -144,7 +143,6 @@ fn compact_agent_panel_entries(app: &AppState) -> Vec<AgentPanelEntry> {
     entries
 }
 
-#[cfg(unix)]
 fn hidden_idle_agent_count(app: &AppState) -> usize {
     if app.agents_view != crate::config::AgentsViewConfig::Cards || !app.agents_hide_idle {
         return 0;
@@ -568,7 +566,6 @@ pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
 
 pub(crate) fn agent_panel_items_rect(_app: &AppState, area: Rect, has_scrollbar: bool) -> Rect {
     let body = agent_panel_body_rect(area, has_scrollbar);
-    #[cfg(unix)]
     let body = {
         let mut body = body;
         if hidden_idle_agent_count(_app) > 0 {
@@ -588,7 +585,6 @@ fn resolved_agent_rows(app: &AppState, entry: &AgentPanelEntry) -> Vec<Vec<Resol
     tokens::agent_rows(&app.sidebar_agents, entry, label)
 }
 
-#[cfg(unix)]
 fn build_agent_card(
     app: &AppState,
     entry: &AgentPanelEntry,
@@ -642,7 +638,6 @@ fn build_agent_card(
 /// `(pane id, toolUseId, card-local span)` for the card's selectable trace
 /// rows, shaped for the watcher's `layout::trace_at`. Display-only rows export
 /// nothing, so a hit-test can never land on one.
-#[cfg(unix)]
 pub(crate) fn agent_card_trace_spans(
     app: &AppState,
     entry: &AgentPanelEntry,
@@ -666,7 +661,6 @@ pub(crate) fn agent_entry_height_in_body(
     _body_width: u16,
     body_height: u16,
 ) -> u16 {
-    #[cfg(unix)]
     if app.agents_view == crate::config::AgentsViewConfig::Cards {
         return build_agent_card(app, entry, _body_width, body_height)
             .lines
@@ -681,7 +675,6 @@ pub(crate) fn agent_entry_height_in_body(
 }
 
 pub(crate) fn agent_entry_gap(app: &AppState, entry_idx: usize, entry_count: usize) -> u16 {
-    #[cfg(unix)]
     if app.agents_view == crate::config::AgentsViewConfig::Cards {
         return 0;
     }
@@ -1703,7 +1696,6 @@ fn render_agent_detail(
         return;
     }
 
-    #[cfg(unix)]
     if app.agents_view == crate::config::AgentsViewConfig::Cards {
         render_agent_cards(app, frame, body, &details, metrics, scrollbar_rect);
         return;
@@ -1768,7 +1760,6 @@ fn render_agent_detail(
     }
 }
 
-#[cfg(unix)]
 fn render_agent_cards(
     app: &AppState,
     frame: &mut Frame,

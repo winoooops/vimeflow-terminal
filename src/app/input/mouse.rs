@@ -76,7 +76,6 @@ impl AppState {
         terminal_runtimes: &TerminalRuntimeRegistry,
         mouse: MouseEvent,
     ) {
-        #[cfg(unix)]
         if self.handle_trace_mouse(mouse) {
             return;
         }
@@ -113,7 +112,6 @@ impl AppState {
             return None;
         }
 
-        #[cfg(unix)]
         if self.handle_trace_mouse(mouse) {
             return None;
         }
@@ -650,7 +648,6 @@ impl AppState {
 
                     // Before the card hit: a trace row sits inside the card's
                     // span, so the more specific target has to win.
-                    #[cfg(unix)]
                     if let Some((pane_id, id)) = self.trace_target_at(mouse.column, mouse.row) {
                         let already = self
                             .agent_trace_focus
@@ -673,7 +670,6 @@ impl AppState {
                             self.agent_card_collapsed_for =
                                 (self.agent_card_collapsed_for != Some(pane_id)).then_some(pane_id);
                             // Collapsing the anchor unrenders its trace rows.
-                            #[cfg(unix)]
                             self.exit_agents_mode();
                             return None;
                         }

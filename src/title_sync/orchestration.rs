@@ -62,7 +62,7 @@ fn terminal_title(pane: &PaneInput, agent: &str) -> Option<String> {
     if title
         .chars()
         .next()
-        .is_some_and(|character| matches!(character, '✳' | '✢' | '·' | '…'))
+        .is_some_and(|character| matches!(character, '✳' | '✢' | '·' | '…' | '◐' | '◑' | '◒' | '◓'))
     {
         title = title
             .chars()
