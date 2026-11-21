@@ -59,7 +59,8 @@ schemars = { version = "1.2.1", features = ["derive"] }
 portable-pty = { path = "vendor/portable-pty" }
 
 [dependencies.herdr-agent-watcher]
-path = "../herdr-agent-watcher"
+git = "https://github.com/winoooops/herdr-agent-watcher.git"
+tag = "v0.3.0"
 features = ["runtime"]
 
 [dependencies.rusqlite]
