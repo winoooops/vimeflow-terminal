@@ -1,3 +1,4 @@
+// Modified from herdr by the vimeflow project — see FORK.md
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
