@@ -95,10 +95,10 @@ mod platform {
         let mut stream = crate::ipc::connect_local_stream(socket)?;
         #[cfg(unix)]
         {
-            use std::time::Duration;
             use interprocess::local_socket::traits::Stream as _;
-            stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-            stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+            use std::time::Duration;
+            stream.set_recv_timeout(Some(Duration::from_secs(2)))?;
+            stream.set_send_timeout(Some(Duration::from_secs(2)))?;
         }
         stream.write_all(b"{\"method\":\"snapshot\"}\n")?;
         let mut line = String::new();

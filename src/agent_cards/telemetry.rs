@@ -170,7 +170,9 @@ mod tests {
                 let mut byte = [0u8; 1];
                 std::io::Read::read_exact(&mut stream, &mut byte).expect("read byte");
                 request.push(byte[0] as char);
-                if byte[0] == b'\n' { break; }
+                if byte[0] == b'\n' {
+                    break;
+                }
             }
             assert_eq!(request, "{\"method\":\"subscribe\"}\n");
             stream.write_all(line.as_bytes()).expect("write snapshot");

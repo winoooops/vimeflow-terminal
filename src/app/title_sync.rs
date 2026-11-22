@@ -92,9 +92,7 @@ impl App {
                 resolved.previous.as_ref(),
             ) {
                 RenameDecision::Adopt => {
-                    if let Some(title) =
-                        sanitize_title(current.label.as_deref(), 200)
-                    {
+                    if let Some(title) = sanitize_title(current.label.as_deref(), 200) {
                         mutations.push(OwnershipMutation {
                             pane_id: resolved.pane_id,
                             state: Some(Ownership {

@@ -112,9 +112,11 @@ mod tests {
                 .expect("daemon config");
             let listener = crate::ipc::bind_local_listener(&socket).expect("fake Herdr socket");
             {
-                use interprocess::local_socket::ListenerNonblockingMode;
                 use interprocess::local_socket::traits::Listener as _;
-                listener.set_nonblocking(ListenerNonblockingMode::Accept).expect("nonblocking socket");
+                use interprocess::local_socket::ListenerNonblockingMode;
+                listener
+                    .set_nonblocking(ListenerNonblockingMode::Accept)
+                    .expect("nonblocking socket");
             }
             let stop = Arc::new(AtomicBool::new(false));
             let thread_stop = stop.clone();
@@ -131,9 +133,13 @@ mod tests {
                                     break;
                                 }
                                 request.push(byte[0] as char);
-                                if byte[0] == b'\n' { break; }
+                                if byte[0] == b'\n' {
+                                    break;
+                                }
                             }
-                            if request.is_empty() { continue; }
+                            if request.is_empty() {
+                                continue;
+                            }
                             let request: serde_json::Value =
                                 serde_json::from_str(&request).expect("request JSON");
                             let response = serde_json::json!({
