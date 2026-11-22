@@ -60,7 +60,7 @@ portable-pty = { path = "vendor/portable-pty" }
 
 [dependencies.herdr-agent-watcher]
 git = "https://github.com/winoooops/herdr-agent-watcher.git"
-tag = "v0.3.0"
+tag = "v0.3.1"
 features = ["runtime"]
 
 [dependencies.rusqlite]
