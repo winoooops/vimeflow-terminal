@@ -349,6 +349,7 @@ pub(crate) fn trace_panel_width(area: Rect) -> u16 {
     area.width.saturating_sub(4).min(60)
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 pub(super) fn render_trace_detail(app: &AppState, frame: &mut Frame, area: Rect) {
     use herdr_agent_watcher::sidebar::dialog;
 

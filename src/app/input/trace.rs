@@ -34,6 +34,7 @@ impl AppState {
     /// The card traces navigate: the keyboard cursor while `Mode::Agents` is
     /// active, otherwise the focused pane's card, which is the only expanded
     /// one. `None` when it is collapsed or there is no agent card.
+    #[cfg_attr(windows, allow(dead_code))]
     pub(super) fn trace_anchor_pane(&self) -> Option<PaneId> {
         if let Some(cursor) = self.agent_card_cursor {
             return Some(cursor);
@@ -329,6 +330,7 @@ impl AppState {
 
     /// Drops navigation-owned state after any mode exit, and reconciles row
     /// identities before each draw independently of client geometry.
+    #[cfg_attr(windows, allow(dead_code))]
     pub(crate) fn reconcile_trace_focus(&mut self) {
         // Mouse-only trace selection has no card cursor or detail panel and
         // remains supported outside Agents mode.
