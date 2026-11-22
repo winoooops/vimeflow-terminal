@@ -115,9 +115,9 @@ herdr v0.8.0 的全部功能，加上：
   智能体检测清单更新；如需禁用，请在 `config.toml` 中设置
   `update.manifest_check = false`。
 
-智能体观察器、自动标题、卡片和键盘导航是**仅 Unix**（macOS 和 Linux）的；
-紧凑栏智能体标记和标签岛在所有平台上都会构建。除此之外，Windows 构建的是
-上游功能集。
+智能体观察器、自动标题、卡片和键盘导航在**所有平台**（macOS、Linux 和
+Windows）上均可使用。紧凑栏智能体标记和标签岛也在所有平台上构建。Live handoff
+和远程附加仍仅限 Unix（需要 `fork()` 和 Unix FD 传递）。
 
 ## 接下来
 

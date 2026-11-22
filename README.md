@@ -128,9 +128,10 @@ Everything herdr v0.8.0 does, plus:
   enabled by default in normal release-build sessions; set
   `update.manifest_check = false` in `config.toml` to opt out.
 
-The agent watcher, automatic titles, cards, and keyboard navigation are
-**Unix-only** (macOS and Linux); compact-rail agent marks and the tab island
-build on every platform. Beyond that, Windows builds the upstream feature set.
+The agent watcher, automatic titles, cards, and keyboard navigation work on
+**all platforms** (macOS, Linux, and Windows). Compact-rail agent marks and the
+tab island also build everywhere. Live handoff and remote attach remain
+Unix-only (they require `fork()` and Unix FD passing).
 
 ## what's coming
 
