@@ -19,7 +19,7 @@ jobs:
             kind: unix
           - os: macos-latest
             kind: unix
-          - os: windows-latest
+          - os: windows-2022
             kind: windows
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20

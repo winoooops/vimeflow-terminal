@@ -957,7 +957,7 @@ dependencies = [
 [[package]]
 name = "herdr-agent-watcher"
 version = "0.3.0"
-source = "git+https://github.com/winoooops/herdr-agent-watcher.git?tag=v0.3.2#ffaec277ad802ad65a7e0de51c01d792bab4f162"
+source = "git+https://github.com/winoooops/herdr-agent-watcher.git?tag=v0.3.3#f36beaa632230a47f22e74ca56096ec32bff49cb"
 dependencies = [
  "chrono",
  "crossterm",
