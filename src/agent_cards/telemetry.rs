@@ -113,7 +113,7 @@ fn run(socket: PathBuf, latest: &Mutex<Option<CacheUpdate>>, shutdown: &AtomicBo
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::Write;
     use std::time::Instant;
 
     use super::*;

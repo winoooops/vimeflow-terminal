@@ -565,14 +565,10 @@ pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
 }
 
 pub(crate) fn agent_panel_items_rect(_app: &AppState, area: Rect, has_scrollbar: bool) -> Rect {
-    let body = agent_panel_body_rect(area, has_scrollbar);
-    let body = {
-        let mut body = body;
-        if hidden_idle_agent_count(_app) > 0 {
-            body.height = body.height.saturating_sub(1);
-        }
-        body
-    };
+    let mut body = agent_panel_body_rect(area, has_scrollbar);
+    if hidden_idle_agent_count(_app) > 0 {
+        body.height = body.height.saturating_sub(1);
+    }
     body
 }
 

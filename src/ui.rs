@@ -31,6 +31,7 @@ use self::dialogs::{
 pub(crate) use self::island::island_animation_for_tab_change;
 use self::island::{compute_island_panel_view, render_island_panel};
 use self::keybind_help::render_keybind_help_overlay;
+#[cfg_attr(windows, allow(unused_imports))]
 use self::menus::render_trace_detail;
 pub(crate) use self::menus::trace_panel_width;
 use self::menus::{
