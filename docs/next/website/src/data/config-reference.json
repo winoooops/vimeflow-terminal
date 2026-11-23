@@ -13,26 +13,20 @@
       ]
     },
     {
-      "id": "built-in-agent-features",
-      "title": "Built-in agent features",
+      "id": "server",
+      "title": "Server",
       "keys": [
         {
-          "key": "agent_watcher.enabled",
-          "type": "boolean",
-          "default": "true",
-          "description": "Start the built-in agent watcher with the server. Startup-only; restart the server after changing it."
+          "key": "server.headless_cols",
+          "type": "integer",
+          "default": "120",
+          "description": "Virtual terminal width used for layout and newly created panes when no client is attached. Must be greater than zero."
         },
         {
-          "key": "title_sync.enabled",
-          "type": "boolean",
-          "default": "true",
-          "description": "Automatically derive labels for supported agent panes. Startup-only; restart the server after changing it."
-        },
-        {
-          "key": "title_sync.interval_ms",
-          "type": "positive integer",
-          "default": "1000",
-          "description": "Polling interval in milliseconds for agent title changes that do not emit lifecycle events."
+          "key": "server.headless_rows",
+          "type": "integer",
+          "default": "40",
+          "description": "Virtual terminal height used for layout and newly created panes when no client is attached. Must be greater than zero."
         }
       ]
     },
@@ -75,6 +69,24 @@
           "type": "color",
           "default": "unset",
           "description": "Override the panel_bg color token on top of the base theme. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.sidebar_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Set the desktop sidebar background without changing other panel surfaces. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.active_row_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Set the active Space and focused Agent row background without changing separators or scrollbar tracks. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.selection_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Set the Navigate-mode cursor row background in the sidebar without changing other selection surfaces. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.surface0",
@@ -204,8 +216,8 @@
         {
           "key": "update.channel",
           "type": "enum",
-          "default": "\"stable\" (\"preview\" on Windows)",
-          "description": "Update channel used by background version checks and herdr update. Homebrew, mise, and Nix installs ignore the preview channel.",
+          "default": "\"stable\" (\"preview\" for Windows preview builds)",
+          "description": "Update channel used by background version checks and herdr update. Stable Windows builds default to stable; existing Windows preview installs stay on preview until explicitly switched. Homebrew, mise, and Nix installs ignore the preview channel.",
           "values": [
             "stable",
             "preview"
@@ -350,18 +362,6 @@
           "description": "Focus the currently visible notification target."
         },
         {
-          "key": "keys.island_panel_toggle",
-          "type": "keybinding",
-          "default": "\"prefix+i\"",
-          "description": "Toggle the island notification panel when island records exist."
-        },
-        {
-          "key": "keys.focus_agents",
-          "type": "keybinding",
-          "default": "\"prefix+a\"",
-          "description": "Move keyboard focus into the agents sidebar to walk cards and their traces."
-        },
-        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",
@@ -420,6 +420,18 @@
           "type": "keybinding",
           "default": "\"prefix+n\"",
           "description": "Select the next tab."
+        },
+        {
+          "key": "keys.move_tab_previous",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Move the active tab one position toward the front. Unset by default."
+        },
+        {
+          "key": "keys.move_tab_next",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Move the active tab one position toward the back. Unset by default."
         },
         {
           "key": "keys.switch_tab",
@@ -554,6 +566,30 @@
           "description": "Enter resize mode."
         },
         {
+          "key": "keys.resize_pane_left",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Resize the focused pane toward the left. Unset by default."
+        },
+        {
+          "key": "keys.resize_pane_down",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Resize the focused pane downward. Unset by default."
+        },
+        {
+          "key": "keys.resize_pane_up",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Resize the focused pane upward. Unset by default."
+        },
+        {
+          "key": "keys.resize_pane_right",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Resize the focused pane toward the right. Unset by default."
+        },
+        {
           "key": "keys.toggle_sidebar",
           "type": "keybinding",
           "default": "\"prefix+b\"",
@@ -616,45 +652,6 @@
             "compact",
             "hidden"
           ]
-        },
-        {
-          "key": "ui.sidebar.agents_view",
-          "type": "\"cards\" | \"legacy\"",
-          "default": "\"cards\"",
-          "description": "Choose adaptive Agent cards or the legacy configurable row view. Reloads live.",
-          "values": [
-            "cards",
-            "legacy"
-          ]
-        },
-        {
-          "key": "ui.sidebar.agents_hide_idle",
-          "type": "boolean",
-          "default": "false",
-          "description": "Hide seen idle agents from cards and Agent focus indexes. Cards mode only; reloads live."
-        },
-        {
-          "key": "ui.sidebar.compact_rail_numbers",
-          "type": "boolean",
-          "default": "true",
-          "description": "Show position numbers beside workspace and Agent state dots in the collapsed compact rail. Reloads live."
-        },
-        {
-          "key": "ui.sidebar.compact_rail_leading",
-          "type": "\"number\" | \"none\" | \"agent\"",
-          "default": "inherit from ui.sidebar.compact_rail_numbers",
-          "description": "Optional leading field for compact Agent rows. When unset, inherits ui.sidebar.compact_rail_numbers. Reloads live.",
-          "values": [
-            "number",
-            "none",
-            "agent"
-          ]
-        },
-        {
-          "key": "ui.sidebar.compact_rail_marks",
-          "type": "table of strings",
-          "default": "{}",
-          "description": "Per-agent two-cell compact-rail mark overrides keyed by canonical agent slugs. One-cell values are right-padded; invalid entries fall back to built-in marks. Reloads live."
         },
         {
           "key": "ui.mobile_width_threshold",
@@ -728,6 +725,12 @@
           "description": "Draw borders around split panes."
         },
         {
+          "key": "ui.pane_outer_borders",
+          "type": "boolean",
+          "default": "true",
+          "description": "Draw borders along the outside edge of the pane area. Disable with pane gaps disabled for tmux-style internal splitters without an outside frame."
+        },
+        {
           "key": "ui.pane_scrollbars",
           "type": "boolean",
           "default": "true",
@@ -762,78 +765,29 @@
           ]
         },
         {
-          "key": "ui.tab_bar_style",
-          "type": "\"island\" | \"classic\"",
-          "default": "\"island\"",
-          "description": "Use the tab island, or set \"classic\" as an escape hatch to restore the upstream tab bar. Reloads live.",
+          "key": "ui.tab_bar_right",
+          "type": "array",
+          "default": "[]",
+          "description": "Configure ordered right-aligned tab bar entries. Supported types are zoom, hostname, datetime, text, and command.",
           "values": [
-            "island",
-            "classic"
+            "zoom",
+            "hostname",
+            "datetime",
+            "text",
+            "command"
           ]
         },
         {
-          "key": "ui.island.position",
-          "type": "\"center\" | \"left\"",
-          "default": "\"center\"",
-          "description": "Center the tab island in the tab row or align it to the left. Reloads live.",
-          "values": [
-            "center",
-            "left"
-          ]
-        },
-        {
-          "key": "ui.island.display",
-          "type": "\"dots\" | \"numbers\" | \"labels\"",
-          "default": "\"dots\"",
-          "description": "Show tabs as dots, numbers, or labels in the tab island. Reloads live.",
-          "values": [
-            "dots",
-            "numbers",
-            "labels"
-          ]
-        },
-        {
-          "key": "ui.island.caps",
-          "type": "\"round\" | \"square\"",
-          "default": "\"round\"",
-          "description": "Use rounded Powerline end caps or the flat square fallback. Reloads live.",
-          "values": [
-            "round",
-            "square"
-          ]
-        },
-        {
-          "key": "ui.island.motion",
-          "type": "\"smooth\" | \"steps\" | \"off\"",
-          "default": "\"smooth\"",
-          "description": "Animate within-page tab changes smoothly, in whole-cell steps, or disable motion. Reloads live.",
-          "values": [
-            "smooth",
-            "steps",
-            "off"
-          ]
-        },
-        {
-          "key": "ui.island.active_title",
-          "type": "boolean",
-          "default": "true",
-          "description": "Show the active tab title in the pill: beside the circle in dots mode, replacing the number in numbers mode. Labels mode is unchanged. Reloads live."
-        },
-        {
-          "key": "ui.island.arrivals",
-          "type": "\"toast\" | \"silent\"",
-          "default": "\"toast\"",
-          "description": "Show an in-app toast when a background agent adds an island notification record, or record it silently. Reloads live.",
-          "values": [
-            "toast",
-            "silent"
-          ]
-        },
-        {
-          "key": "ui.island.bell",
+          "key": "ui.tab_bar_right_separator",
           "type": "string",
-          "default": "\"🔔\"",
-          "description": "Bell mark shown with the unread island-notification count. The emoji default needs no Nerd Font; use ! for ASCII. Values must occupy 1-2 display cells; one-cell values are right-padded and invalid values fall back to !. Reloads live."
+          "default": "\" \"",
+          "description": "Text inserted between visible right-aligned tab bar entries."
+        },
+        {
+          "key": "ui.window_title",
+          "type": "string",
+          "default": "\"{hostname}: {workspace}\"",
+          "description": "Title Herdr writes to the terminal it runs in. Tokens: {hostname}, {workspace}, {tab}, {pane}, {terminal_title}. Empty leaves the outer title alone."
         },
         {
           "key": "ui.agent_panel_sort",
@@ -843,6 +797,16 @@
           "values": [
             "spaces",
             "priority"
+          ]
+        },
+        {
+          "key": "ui.status_indicators",
+          "type": "enum",
+          "default": "\"dots\"",
+          "description": "Choose compact color dots or distinct static symbols for agent states.",
+          "values": [
+            "dots",
+            "symbols"
           ]
         },
         {
@@ -908,10 +872,9 @@
         {
           "key": "ui.toast.herdr.position",
           "type": "enum",
-          "default": "\"island\"",
-          "description": "Desktop in-app toast position. island centers on the capsule and opens toward the panes, or uses top-center when no capsule is laid out. Corner positions are relative to the full Herdr frame. Mobile keeps its bottom banner.",
+          "default": "\"bottom-right\"",
+          "description": "In-app toast position, relative to the full Herdr frame.",
           "values": [
-            "island",
             "top-left",
             "top-right",
             "bottom-left",
@@ -1167,6 +1130,17 @@
           ]
         },
         {
+          "key": "ui.sound.agents.qwen",
+          "type": "enum",
+          "default": "\"default\"",
+          "description": "Sound override for detected Qwen Code agents.",
+          "values": [
+            "default",
+            "on",
+            "off"
+          ]
+        },
+        {
           "key": "ui.sound.agents.maki",
           "type": "enum",
           "default": "\"default\"",
@@ -1259,7 +1233,7 @@
           "key": "experimental.cjk_ime_agents",
           "type": "list of strings",
           "default": "[]",
-          "description": "Restrict `reveal_hidden_cursor_for_cjk_ime` to focused panes whose detected agent matches one of these names (case-insensitive). Empty list means apply to any focused pane. Unknown agent names are ignored; if the list contains no valid names, the reveal does not apply. Accepted names: pi, claude, codex, gemini, cursor, devin, cline, opencode, copilot, kimi, kiro, droid, amp, grok, hermes, kilo, qodercli, qoder, maki."
+          "description": "Restrict `reveal_hidden_cursor_for_cjk_ime` to focused panes whose detected agent matches one of these names (case-insensitive). Empty list means apply to any focused pane. Unknown agent names are ignored; if the list contains no valid names, the reveal does not apply. Accepted names: pi, claude, codex, gemini, cursor, devin, cline, opencode, copilot, kimi, kiro, droid, amp, grok, hermes, kilo, qodercli, qoder, qwen, qwen-code, maki."
         },
         {
           "key": "experimental.cjk_ime_cursor_shape",

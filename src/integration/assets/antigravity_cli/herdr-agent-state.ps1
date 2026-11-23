@@ -1,4 +1,3 @@
-# Modified from herdr by the vimeflow project — see FORK.md
 # installed by herdr
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
@@ -34,6 +33,7 @@ $conversationId = if ($payload.conversationId -is [string]) { $payload.conversat
 if ([string]::IsNullOrWhiteSpace($conversationId)) { Exit-Hook }
 
 $seq = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$herdr = if ([string]::IsNullOrWhiteSpace($env:HERDR_BIN_PATH)) { "herdr" } else { $env:HERDR_BIN_PATH }
 try {
     $sessionArgs = @(
         "pane",
@@ -51,7 +51,7 @@ try {
     if ($payload.transcriptPath -is [string] -and -not [string]::IsNullOrWhiteSpace($payload.transcriptPath)) {
         $sessionArgs += @("--agent-session-path", "$($payload.transcriptPath)")
     }
-    & vimeflow @sessionArgs 2>$null | Out-Null
+    & $herdr @sessionArgs 2>$null | Out-Null
 } catch {
 }
 
