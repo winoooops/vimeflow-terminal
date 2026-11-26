@@ -881,20 +881,49 @@ pub struct AppState {
     pub(crate) plugin_command_logs: Vec<crate::api::schema::PluginCommandLogInfo>,
     pub(crate) next_plugin_command_log_id: u64,
     pub(crate) plugin_commands_in_flight: usize,
+    pub agents_view: crate::config::AgentsViewConfig,
+    pub agents_hide_idle: bool,
     /// Resolved host terminal default colors for theming embedded panes.
     pub host_terminal_theme: TerminalTheme,
     /// Last known foreground host terminal cell size in pixels.
     pub(crate) host_cell_size: crate::kitty_graphics::HostCellSize,
     /// Set when a persisted session snapshot would change.
     pub session_dirty: bool,
+    /// Monotonic signal consumed by the coalesced native title-sync worker.
+    pub(crate) title_sync_generation: u64,
+    pub(crate) island_records: std::collections::VecDeque<IslandRecord>,
     /// Terminal runtimes that should be shut down by the app/runtime layer
     /// after state has detached their terminal metadata.
     pub(crate) terminal_runtime_shutdowns: Vec<crate::terminal::TerminalId>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct IslandRecord {
+    pub(crate) id: u64,
+    pub(crate) workspace_id: String,
+    pub(crate) tab_id: String,
+    pub(crate) pane_id: PaneId,
+    pub(crate) agent: Option<crate::detect::Agent>,
+    pub(crate) reason: IslandReason,
+    pub(crate) text: String,
+    pub(crate) at: std::time::SystemTime,
+    pub(crate) read: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum IslandReason {
+    Bell,
+    AgentDone,
+}
+
 impl AppState {
     pub(crate) fn mark_session_dirty(&mut self) {
         self.session_dirty = true;
+        self.mark_title_sync_dirty();
+    }
+
+    pub(crate) fn mark_title_sync_dirty(&mut self) {
+        self.title_sync_generation = self.title_sync_generation.wrapping_add(1);
     }
 
     pub(crate) fn remove_alias_shadowed_by_new_pane(&mut self, pane_id: PaneId) {
@@ -1103,9 +1132,13 @@ impl AppState {
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
+            agents_view: crate::config::AgentsViewConfig::Cards,
+            agents_hide_idle: false,
             host_terminal_theme: TerminalTheme::default(),
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             session_dirty: false,
+            title_sync_generation: 0,
+            island_records: std::collections::VecDeque::new(),
             terminal_runtime_shutdowns: Vec::new(),
         }
     }

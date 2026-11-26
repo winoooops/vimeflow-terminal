@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, num::NonZeroUsize};
+use std::{collections::BTreeSet, num::{NonZeroU64, NonZeroUsize}};
 
 use crossterm::event::KeyModifiers;
 use serde::{de, Deserialize, Deserializer, Serialize};
@@ -308,10 +308,12 @@ pub fn validated_sidebar_bounds(min: u16, max: u16) -> Option<(u16, u16)> {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub agent_watcher: AgentWatcherConfig,
     pub onboarding: Option<bool>,
     pub theme: ThemeConfig,
     pub terminal: TerminalConfig,
     pub session: SessionConfig,
+    pub title_sync: TitleSyncConfig,
     pub server: ServerConfig,
     pub update: UpdateConfig,
     pub keys: KeysConfig,
@@ -320,6 +322,34 @@ pub struct Config {
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct AgentWatcherConfig {
+    pub enabled: bool,
+}
+
+impl Default for AgentWatcherConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct TitleSyncConfig {
+    pub enabled: bool,
+    pub interval_ms: NonZeroU64,
+}
+
+impl Default for TitleSyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_ms: NonZeroU64::new(1_000).unwrap_or(NonZeroU64::MIN),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -371,6 +401,10 @@ pub struct KeysConfig {
     pub reload_config: BindingConfig,
     /// Focus the currently visible notification target. Default: "prefix+o".
     pub open_notification_target: BindingConfig,
+    /// Toggle the island notification panel. Default: "prefix+i".
+    pub island_panel_toggle: BindingConfig,
+    /// Focus the agents sidebar. Default: "prefix+a".
+    pub focus_agents: BindingConfig,
     /// Select the previous workspace. Unset by default.
     pub previous_workspace: BindingConfig,
     /// Select the next workspace. Unset by default.
@@ -503,6 +537,10 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     open_notification_target: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    island_panel_toggle: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    focus_agents: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     previous_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_workspace: Option<BindingConfig>,
@@ -629,6 +667,8 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(detach);
         apply_field!(reload_config);
         apply_field!(open_notification_target);
+        apply_field!(island_panel_toggle);
+        apply_field!(focus_agents);
         apply_field!(previous_workspace);
         apply_field!(next_workspace);
         apply_field!(previous_agent);
@@ -733,6 +773,8 @@ impl KeysConfig {
         copy_effective_action_field!(detach, keybinds.detach);
         copy_effective_action_field!(reload_config, keybinds.reload_config);
         copy_effective_action_field!(open_notification_target, keybinds.open_notification_target);
+        copy_effective_action_field!(island_panel_toggle, keybinds.island_panel_toggle);
+        copy_effective_action_field!(focus_agents, keybinds.focus_agents);
         copy_effective_action_field!(previous_workspace, keybinds.previous_workspace);
         copy_effective_action_field!(next_workspace, keybinds.next_workspace);
         copy_effective_action_field!(previous_agent, keybinds.previous_agent);
@@ -842,6 +884,92 @@ pub enum TabBarPositionConfig {
     #[default]
     Top,
     Bottom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TabBarStyleConfig {
+    #[default]
+    Island,
+    Classic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandPositionConfig {
+    #[default]
+    Center,
+    Left,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandDisplayConfig {
+    #[default]
+    Dots,
+    Numbers,
+    Labels,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandCapsConfig {
+    #[default]
+    Round,
+    Square,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandMotionConfig {
+    #[default]
+    Smooth,
+    Steps,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IslandArrivalsConfig {
+    #[default]
+    Toast,
+    Silent,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_island_bell() -> String {
+    "\u{1F514}".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct IslandConfig {
+    pub position: IslandPositionConfig,
+    pub display: IslandDisplayConfig,
+    pub caps: IslandCapsConfig,
+    pub motion: IslandMotionConfig,
+    #[serde(default = "default_true")]
+    pub active_title: bool,
+    pub arrivals: IslandArrivalsConfig,
+    #[serde(default = "default_island_bell")]
+    pub bell: String,
+}
+
+impl Default for IslandConfig {
+    fn default() -> Self {
+        Self {
+            position: IslandPositionConfig::default(),
+            display: IslandDisplayConfig::default(),
+            caps: IslandCapsConfig::default(),
+            motion: IslandMotionConfig::default(),
+            active_title: default_true(),
+            arrivals: IslandArrivalsConfig::default(),
+            bell: default_island_bell(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1101,6 +1229,8 @@ impl Default for KeysConfig {
             detach: BindingConfig::one("prefix+q"),
             reload_config: BindingConfig::one("prefix+shift+r"),
             open_notification_target: BindingConfig::one("prefix+o"),
+            island_panel_toggle: BindingConfig::one("prefix+i"),
+            focus_agents: BindingConfig::one("prefix+a"),
             previous_workspace: BindingConfig::empty(),
             next_workspace: BindingConfig::empty(),
             previous_agent: BindingConfig::empty(),

@@ -23,10 +23,13 @@ mod popup;
 mod runtime;
 mod session;
 pub mod state;
+mod island_stubs;
+mod pane_label;
 mod tab_bar_status;
 mod terminal_targets;
 mod terminal_titles;
 mod theme_sync;
+mod title_sync;
 mod window_title;
 mod worktrees;
 
@@ -482,6 +485,8 @@ impl App {
             prefix_mods,
             headless_size: config.headless_size(),
             agent_panel_sort,
+            agents_view: config.ui.sidebar.agents_view,
+            agents_hide_idle: config.ui.sidebar.agents_hide_idle,
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
@@ -523,6 +528,8 @@ impl App {
             host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             session_dirty: false,
+            title_sync_generation: 0,
+            island_records: std::collections::VecDeque::new(),
             terminal_runtime_shutdowns: Vec::new(),
         };
 
@@ -847,6 +854,8 @@ impl App {
                 self.configure_window_title(&config.ui.window_title);
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
+                self.state.agents_view = config.ui.sidebar.agents_view;
+                self.state.agents_hide_idle = config.ui.sidebar.agents_hide_idle;
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.sound = config.ui.sound.clone();

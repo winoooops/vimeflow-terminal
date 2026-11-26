@@ -55,6 +55,10 @@ pub struct WorktreeRemoveResult {
 /// An event from a background task to the main loop.
 #[derive(Debug)]
 pub enum AppEvent {
+    TitleSyncResolved {
+        generation: u64,
+        panes: Vec<crate::title_sync::ResolvedPane>,
+    },
     /// A pane's child process exited.
     PaneDied {
         pane_id: PaneId,

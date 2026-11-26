@@ -1966,6 +1966,17 @@ pub fn signal_processes(pids: &[u32], signal: Signal) {
     }
 }
 
+pub fn process_agent_hint(pid: u32) -> Option<crate::detect::Agent> {
+    if pid == 0 {
+        return None;
+    }
+    let process = ProcessHandle::open(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)?;
+    let parameters = read_process_parameters(process.0)?;
+    let environment = read_process_environment(process.0, parameters.environment)?;
+    let value = environment_variable_from_utf16(&environment, "HERDR_AGENT")?;
+    crate::detect::parse_agent_label(&value)
+}
+
 pub fn process_exists(pid: u32) -> bool {
     let Some(process) = ProcessHandle::open(pid, PROCESS_QUERY_LIMITED_INFORMATION) else {
         return false;

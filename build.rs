@@ -60,41 +60,52 @@ fn main() {
         .trim()
         .to_string();
 
-    let zig = env::var("ZIG").unwrap_or_else(|_| "zig".into());
-    let mut command = Command::new(&zig);
-    command
-        .arg("build")
-        .arg("-Demit-lib-vt")
-        .arg(format!("-Doptimize={optimize}"))
-        .arg(format!("-Dsimd={simd}"))
-        .arg(format!("-Dtarget={zig_target}"))
-        .arg(format!("-Dversion-string={version_string}"))
-        .arg("-Demit-xcframework=false");
-    if let Ok(system_dir) = env::var("LIBGHOSTTY_VT_ZIG_SYSTEM_DIR") {
-        command.arg("--system").arg(system_dir);
-    }
-
-    let status = command
-        .current_dir(&vendored_dir)
-        .status()
-        .unwrap_or_else(|err| {
-            if err.kind() == std::io::ErrorKind::NotFound {
-                panic!(
-                    "zig executable not found (looked for {zig:?}; set the ZIG \
-                     environment variable to point at the zig binary). Building \
-                     the vendored libghostty-vt requires Zig 0.15.2: on macOS run \
-                     `brew install zig@0.15`, elsewhere install it from \
-                     https://ziglang.org/download/, then retry the build"
-                );
-            }
-            panic!("failed to execute zig build for vendored libghostty-vt: {err}");
-        });
-    assert!(
-        status.success(),
-        "zig build for vendored libghostty-vt failed: {status}"
-    );
-
     let lib_dir = vendored_dir.join("zig-out/lib");
+
+    // Skip the zig build when the output library already exists (fork patch).
+    let lib_exists = if target.contains("apple-darwin") {
+        lib_dir.join("libghostty-vt.a").exists()
+    } else if target.contains("windows-msvc") {
+        lib_dir.join("ghostty-vt-static.lib").exists()
+    } else {
+        lib_dir.join("libghostty-vt.a").exists()
+    };
+
+    if !lib_exists || env_bool("LIBGHOSTTY_VT_REBUILD").unwrap_or(false) {
+        let zig = env::var("ZIG").unwrap_or_else(|_| "zig".into());
+        let mut command = Command::new(&zig);
+        command
+            .arg("build")
+            .arg("-Demit-lib-vt")
+            .arg(format!("-Doptimize={optimize}"))
+            .arg(format!("-Dsimd={simd}"))
+            .arg(format!("-Dtarget={zig_target}"))
+            .arg(format!("-Dversion-string={version_string}"))
+            .arg("-Demit-xcframework=false");
+        if let Ok(system_dir) = env::var("LIBGHOSTTY_VT_ZIG_SYSTEM_DIR") {
+            command.arg("--system").arg(system_dir);
+        }
+
+        let status = command
+            .current_dir(&vendored_dir)
+            .status()
+            .unwrap_or_else(|err| {
+                if err.kind() == std::io::ErrorKind::NotFound {
+                    panic!(
+                        "zig executable not found (looked for {zig:?}; set the ZIG \
+                         environment variable to point at the zig binary). Building \
+                         the vendored libghostty-vt requires Zig 0.15.2: on macOS run \
+                         `brew install zig@0.15`, elsewhere install it from \
+                         https://ziglang.org/download/, then retry the build"
+                    );
+                }
+                panic!("failed to execute zig build for vendored libghostty-vt: {err}");
+            });
+        assert!(
+            status.success(),
+            "zig build for vendored libghostty-vt failed: {status}"
+        );
+    }
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     if target.contains("apple-darwin") {
         let static_lib = lib_dir.join("libghostty-vt.a");
