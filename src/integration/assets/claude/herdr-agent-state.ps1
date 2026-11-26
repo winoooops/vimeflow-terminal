@@ -1,4 +1,3 @@
-# Modified from herdr by the vimeflow project — see FORK.md
 # installed by herdr
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
@@ -25,6 +24,7 @@ $sessionId = $payload.session_id
 if ([string]::IsNullOrWhiteSpace($sessionId)) { exit 0 }
 
 $seq = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$herdr = if ([string]::IsNullOrWhiteSpace($env:HERDR_BIN_PATH)) { "herdr" } else { $env:HERDR_BIN_PATH }
 try {
     $args = @(
         "pane",
@@ -45,6 +45,6 @@ try {
     if ($payload.hook_event_name -eq "SessionStart" -and $payload.source -is [string] -and -not [string]::IsNullOrWhiteSpace($payload.source)) {
         $args += @("--session-start-source", "$($payload.source)")
     }
-    & vimeflow @args 2>$null | Out-Null
+    & $herdr @args 2>$null | Out-Null
 } catch {
 }

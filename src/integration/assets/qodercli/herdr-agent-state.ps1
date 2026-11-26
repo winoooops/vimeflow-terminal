@@ -1,4 +1,3 @@
-# Modified from herdr by the vimeflow project — see FORK.md
 # installed by herdr
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
@@ -21,7 +20,8 @@ try {
 if ($null -eq $payload -or [string]::IsNullOrWhiteSpace($payload.session_id)) { exit 0 }
 
 $seq = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$herdr = if ([string]::IsNullOrWhiteSpace($env:HERDR_BIN_PATH)) { "herdr" } else { $env:HERDR_BIN_PATH }
 try {
-    & vimeflow pane report-agent-session $env:HERDR_PANE_ID --source herdr:qodercli --agent qodercli --agent-session-id $payload.session_id --seq $seq 2>$null | Out-Null
+    & $herdr pane report-agent-session $env:HERDR_PANE_ID --source herdr:qodercli --agent qodercli --agent-session-id $payload.session_id --seq $seq 2>$null | Out-Null
 } catch {
 }

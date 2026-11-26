@@ -1,5 +1,4 @@
 #!/bin/sh
-# Modified from herdr by the vimeflow project — see FORK.md
 # managed by herdr; reinstalling the integration replaces this file.
 # HERDR_INTEGRATION_ID=qodercli
 # HERDR_INTEGRATION_VERSION=3
@@ -8,7 +7,6 @@
 [ "${HERDR_ENV:-}" = "1" ] || exit 0
 [ -n "${HERDR_SOCKET_PATH:-}" ] || exit 0
 [ -n "${HERDR_PANE_ID:-}" ] || exit 0
-command -v vimeflow >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
 python3 -c '
@@ -25,7 +23,8 @@ try:
         raise ValueError
     subprocess.run(
         [
-            "vimeflow", "pane", "report-agent-session", os.environ["HERDR_PANE_ID"],
+            os.environ.get("HERDR_BIN_PATH") or "herdr",
+            "pane", "report-agent-session", os.environ["HERDR_PANE_ID"],
             "--source", "herdr:qodercli", "--agent", "qodercli",
             "--agent-session-id", session_id, "--seq", str(time.time_ns()),
         ],
