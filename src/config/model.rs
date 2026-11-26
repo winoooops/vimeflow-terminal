@@ -1,8 +1,4 @@
-// Modified from herdr by the vimeflow project — see FORK.md
-use std::{
-    collections::BTreeSet,
-    num::{NonZeroU64, NonZeroUsize},
-};
+use std::{collections::BTreeSet, num::{NonZeroU64, NonZeroUsize}};
 
 use crossterm::event::KeyModifiers;
 use serde::{de, Deserialize, Deserializer, Serialize};
@@ -77,11 +73,10 @@ pub enum ToastDelivery {
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum ToastHerdrPosition {
-    #[default]
-    Island,
     TopLeft,
     TopRight,
     BottomLeft,
+    #[default]
     BottomRight,
 }
 
@@ -104,15 +99,6 @@ pub enum AgentPanelSortConfig {
     #[serde(alias = "workspaces")]
     Spaces,
     Priority,
-}
-
-impl AgentPanelSortConfig {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Spaces => "spaces",
-            Self::Priority => "priority",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -217,7 +203,7 @@ pub struct ToastConfig {
     pub clipboard: ClipboardToastConfig,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct HerdrToastConfig {
     pub position: ToastHerdrPosition,
@@ -272,6 +258,8 @@ pub struct TerminalConfig {
     pub shell_mode: ShellModeConfig,
     /// CWD policy for new interactive panes, tabs, and workspaces.
     pub new_cwd: NewTerminalCwdConfig,
+    /// Render Kitty graphics in compatible outer terminals. Default: true.
+    pub kitty_graphics: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -407,7 +395,7 @@ pub struct KeysConfig {
     pub navigate_pane_up: BindingConfig,
     /// Focus the pane to the right in navigate mode. Default: "l". Right arrow is always an alias.
     pub navigate_pane_right: BindingConfig,
-    /// Detach from server/client mode, or exit --no-session mode. Default: "prefix+q".
+    /// Detach the current client from its Herdr server. Default: "prefix+q".
     pub detach: BindingConfig,
     /// Reload config.toml in the running app/server. Default: "prefix+shift+r".
     pub reload_config: BindingConfig,
@@ -415,7 +403,7 @@ pub struct KeysConfig {
     pub open_notification_target: BindingConfig,
     /// Toggle the island notification panel. Default: "prefix+i".
     pub island_panel_toggle: BindingConfig,
-    /// Move keyboard focus into the agents sidebar. Default: "prefix+a".
+    /// Focus the agents sidebar. Default: "prefix+a".
     pub focus_agents: BindingConfig,
     /// Select the previous workspace. Unset by default.
     pub previous_workspace: BindingConfig,
@@ -634,6 +622,12 @@ pub(crate) struct KeysConfigOverlay {
     indexed: Option<IndexedKeysConfig>,
     #[serde(skip_serializing)]
     command: Option<Vec<CommandKeybindConfig>>,
+}
+
+impl KeysConfigOverlay {
+    pub(crate) fn set_prefix(&mut self, prefix: String) {
+        self.prefix = Some(prefix);
+    }
 }
 
 impl<'de> Deserialize<'de> for KeysConfig {
@@ -942,6 +936,14 @@ pub enum IslandArrivalsConfig {
     Silent,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_island_bell() -> String {
+    "\u{1F514}".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct IslandConfig {
@@ -970,12 +972,58 @@ impl Default for IslandConfig {
     }
 }
 
-fn default_true() -> bool {
-    true
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PaneBordersConfig {
+    #[default]
+    Auto,
+    Always,
+    Off,
 }
 
-fn default_island_bell() -> String {
-    "🔔".to_string()
+impl PaneBordersConfig {
+    pub fn draws_borders(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+
+    pub fn shows_borders(self, multi_pane: bool) -> bool {
+        self.draws_borders() && (multi_pane || matches!(self, Self::Always))
+    }
+}
+
+impl<'de> Deserialize<'de> for PaneBordersConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PaneBordersVisitor;
+
+        impl<'de> de::Visitor<'de> for PaneBordersVisitor {
+            type Value = PaneBordersConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("\"auto\", \"always\", \"off\", or a legacy boolean")
+            }
+
+            fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(if value {
+                    PaneBordersConfig::Auto
+                } else {
+                    PaneBordersConfig::Off
+                })
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                match value {
+                    "auto" => Ok(PaneBordersConfig::Auto),
+                    "always" => Ok(PaneBordersConfig::Always),
+                    "off" => Ok(PaneBordersConfig::Off),
+                    other => Err(E::invalid_value(de::Unexpected::Str(other), &self)),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(PaneBordersVisitor)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1010,8 +1058,12 @@ pub struct UiConfig {
     pub prompt_new_tab_name: bool,
     /// Ask for a workspace name before interactive creation. Default: false.
     pub prompt_new_workspace_name: bool,
-    /// Draw borders around split panes. Default: true.
-    pub pane_borders: bool,
+    /// Draw borders around split panes. auto draws them only for split panes,
+    /// always also frames a lone pane (only while pane_outer_borders is
+    /// enabled, since every edge of a lone pane is an outer edge), off
+    /// disables them. Legacy booleans map true to auto and false to off.
+    /// Default: auto.
+    pub pane_borders: PaneBordersConfig,
     /// Draw borders along the outside edge of the pane area. Default: true.
     pub pane_outer_borders: bool,
     /// Draw interactive scrollbars beside terminal panes. Default: true.
@@ -1024,10 +1076,6 @@ pub struct UiConfig {
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
     pub tab_bar_position: TabBarPositionConfig,
-    /// Desktop tab row presentation. Default: island.
-    pub tab_bar_style: TabBarStyleConfig,
-    /// Tab island presentation settings.
-    pub island: IslandConfig,
     /// Ordered entries shown at the right edge of the desktop tab row. Empty by default.
     pub tab_bar_right: Vec<TabBarRightEntryConfig>,
     /// Text inserted between visible right-side tab bar entries. Default: one space.
@@ -1118,8 +1166,8 @@ impl Default for RemoteConfig {
 pub struct ExperimentalConfig {
     /// Allow launching herdr inside an existing herdr pane. Default: false.
     pub allow_nested: bool,
-    /// Experimental local Kitty graphics rendering for attached clients. Default: false.
-    pub kitty_graphics: bool,
+    /// Deprecated compatibility key for `terminal.kitty_graphics`.
+    pub kitty_graphics: Option<bool>,
     /// Persist pane screen history to session-history.json. Default: false.
     pub pane_history: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
@@ -1255,15 +1303,13 @@ impl Default for UiConfig {
             confirm_close: true,
             prompt_new_tab_name: true,
             prompt_new_workspace_name: false,
-            pane_borders: true,
+            pane_borders: PaneBordersConfig::Auto,
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
-            tab_bar_style: TabBarStyleConfig::Island,
-            island: IslandConfig::default(),
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
             window_title: super::window_title::default_window_title(),
@@ -1297,6 +1343,14 @@ impl Default for ToastConfig {
             delay_seconds: 1,
             herdr: HerdrToastConfig::default(),
             clipboard: ClipboardToastConfig::default(),
+        }
+    }
+}
+
+impl Default for HerdrToastConfig {
+    fn default() -> Self {
+        Self {
+            position: ToastHerdrPosition::BottomRight,
         }
     }
 }
@@ -1388,35 +1442,6 @@ manifest_check = false
         assert!(!config.update.manifest_check);
     }
 
-    #[test]
-    fn native_agent_feature_config_defaults_and_parses() {
-        let defaults = Config::default();
-        assert!(defaults.agent_watcher.enabled);
-        assert!(defaults.title_sync.enabled);
-        assert_eq!(defaults.title_sync.interval_ms.get(), 1_000);
-
-        let config: Config = toml::from_str(
-            r#"
-[agent_watcher]
-enabled = false
-
-[title_sync]
-enabled = false
-interval_ms = 250
-"#,
-        )
-        .unwrap();
-        assert!(!config.agent_watcher.enabled);
-        assert!(!config.title_sync.enabled);
-        assert_eq!(config.title_sync.interval_ms.get(), 250);
-    }
-
-    #[test]
-    fn title_sync_interval_must_be_positive() {
-        assert!(toml::from_str::<Config>("[title_sync]\ninterval_ms = 0").is_err());
-    }
-
-    #[cfg(windows)]
     #[test]
     fn update_channel_default_follows_windows_build_identity() {
         assert_eq!(
@@ -1553,9 +1578,34 @@ status_indicators = "symbols"
     }
 
     #[test]
+    fn pane_borders_legacy_booleans_map_to_modes() {
+        let enabled: Config = toml::from_str("[ui]\npane_borders = true").unwrap();
+        assert_eq!(enabled.ui.pane_borders, PaneBordersConfig::Auto);
+
+        let disabled: Config = toml::from_str("[ui]\npane_borders = false").unwrap();
+        assert_eq!(disabled.ui.pane_borders, PaneBordersConfig::Off);
+
+        let auto: Config = toml::from_str("[ui]\npane_borders = \"auto\"").unwrap();
+        assert_eq!(auto.ui.pane_borders, PaneBordersConfig::Auto);
+
+        let off: Config = toml::from_str("[ui]\npane_borders = \"off\"").unwrap();
+        assert_eq!(off.ui.pane_borders, PaneBordersConfig::Off);
+
+        let unknown = toml::from_str::<Config>("[ui]\npane_borders = \"framed\"")
+            .unwrap_err()
+            .to_string();
+        assert!(unknown.contains("\"auto\", \"always\", \"off\", or a legacy boolean"));
+
+        let wrong_type = toml::from_str::<Config>("[ui]\npane_borders = 3")
+            .unwrap_err()
+            .to_string();
+        assert!(wrong_type.contains("\"auto\", \"always\", \"off\", or a legacy boolean"));
+    }
+
+    #[test]
     fn pane_appearance_defaults_and_parse() {
         let default_config = Config::default();
-        assert!(default_config.ui.pane_borders);
+        assert_eq!(default_config.ui.pane_borders, PaneBordersConfig::Auto);
         assert!(default_config.ui.pane_outer_borders);
         assert!(default_config.ui.pane_scrollbars);
         assert!(default_config.ui.pane_gaps);
@@ -1570,7 +1620,7 @@ status_indicators = "symbols"
 
         let toml = r#"
 [ui]
-pane_borders = false
+pane_borders = "always"
 pane_outer_borders = false
 pane_scrollbars = false
 pane_gaps = true
@@ -1587,7 +1637,7 @@ tab_bar_right = [
 tab_bar_right_separator = " · "
 "#;
         let config: Config = toml::from_str(toml).unwrap();
-        assert!(!config.ui.pane_borders);
+        assert_eq!(config.ui.pane_borders, PaneBordersConfig::Always);
         assert!(!config.ui.pane_outer_borders);
         assert!(!config.ui.pane_scrollbars);
         assert!(config.ui.pane_gaps);
@@ -1600,111 +1650,6 @@ tab_bar_right_separator = " · "
             TabBarRightEntryConfig::Hostname
         ));
         assert_eq!(config.ui.tab_bar_right_separator, " · ");
-    }
-
-    #[test]
-    fn island_config_defaults_when_absent() {
-        let config: Config = toml::from_str("").unwrap();
-
-        assert_eq!(config.ui.tab_bar_style, TabBarStyleConfig::Island);
-        assert_eq!(config.ui.island.position, IslandPositionConfig::Center);
-        assert_eq!(config.ui.island.display, IslandDisplayConfig::Dots);
-        assert_eq!(config.ui.island.caps, IslandCapsConfig::Round);
-        assert_eq!(config.ui.island.motion, IslandMotionConfig::Smooth);
-        assert!(config.ui.island.active_title);
-        assert_eq!(config.ui.island.arrivals, IslandArrivalsConfig::Toast);
-        assert_eq!(config.ui.island.bell, "🔔");
-        let island = toml::from_str::<Config>("[ui.island]\ndisplay = \"numbers\"\n")
-            .unwrap()
-            .ui
-            .island;
-        assert!(island.active_title);
-        assert_eq!(island.arrivals, IslandArrivalsConfig::Toast);
-        assert_eq!(island.bell, "🔔");
-    }
-
-    #[test]
-    fn tab_bar_style_parses_classic() {
-        let config: Config = toml::from_str(
-            r#"
-[ui]
-tab_bar_style = "classic"
-"#,
-        )
-        .unwrap();
-
-        assert_eq!(config.ui.tab_bar_style, TabBarStyleConfig::Classic);
-    }
-
-    #[test]
-    fn island_config_parses_position_and_display() {
-        let config: Config = toml::from_str(
-            r#"
-[ui.island]
-position = "left"
-display = "labels"
-active_title = false
-"#,
-        )
-        .unwrap();
-
-        assert_eq!(config.ui.island.position, IslandPositionConfig::Left);
-        assert_eq!(config.ui.island.display, IslandDisplayConfig::Labels);
-        assert!(!config.ui.island.active_title);
-    }
-
-    #[test]
-    fn island_caps_parses_square() {
-        let config: Config = toml::from_str(
-            r#"
-[ui.island]
-caps = "square"
-"#,
-        )
-        .unwrap();
-
-        assert_eq!(config.ui.island.caps, IslandCapsConfig::Square);
-    }
-
-    #[test]
-    fn island_motion_parses_all_values() {
-        for (value, expected) in [
-            ("smooth", IslandMotionConfig::Smooth),
-            ("steps", IslandMotionConfig::Steps),
-            ("off", IslandMotionConfig::Off),
-        ] {
-            let toml = format!("[ui.island]\nmotion = \"{value}\"\n");
-            let config: Config = toml::from_str(&toml).unwrap();
-            assert_eq!(config.ui.island.motion, expected);
-        }
-    }
-
-    #[test]
-    fn island_motion_rejects_unknown_value() {
-        assert!(toml::from_str::<Config>("[ui.island]\nmotion = \"unknown\"\n").is_err());
-    }
-
-    #[test]
-    fn island_arrivals_parses_silent_and_rejects_unknown_value() {
-        let config: Config = toml::from_str("[ui.island]\narrivals = \"silent\"\n").unwrap();
-        assert_eq!(config.ui.island.arrivals, IslandArrivalsConfig::Silent);
-        assert!(toml::from_str::<Config>("[ui.island]\narrivals = \"unknown\"\n").is_err());
-    }
-
-    #[test]
-    fn island_bell_parses_string_override() {
-        let config: Config = toml::from_str("[ui.island]\nbell = \"B\"\n").unwrap();
-        assert_eq!(config.ui.island.bell, "B");
-    }
-
-    #[test]
-    fn tab_bar_style_rejects_unknown_value() {
-        let toml = r#"
-[ui]
-tab_bar_style = "unknown"
-"#;
-
-        assert!(toml::from_str::<Config>(toml).is_err());
     }
 
     #[test]
@@ -2036,40 +1981,19 @@ position = "top-center"
     }
 
     #[test]
-    fn toast_config_defaults_to_island_with_existing_delivery_and_delay() {
+    fn toast_config_defaults_preserve_existing_behavior_with_delay() {
         let config = Config::default();
         assert_eq!(config.ui.toast.delivery, ToastDelivery::Off);
         assert_eq!(config.ui.toast.delay_seconds, 1);
-        assert_eq!(config.ui.toast.herdr.position, ToastHerdrPosition::Island);
+        assert_eq!(
+            config.ui.toast.herdr.position,
+            ToastHerdrPosition::BottomRight
+        );
         assert!(config.ui.toast.clipboard.enabled);
         assert_eq!(
             config.ui.toast.clipboard.position,
             ToastClipboardPosition::BottomCenter
         );
-    }
-
-    #[test]
-    fn toast_config_absent_position_defaults_to_island() {
-        for source in ["", "[ui.toast]", "[ui.toast.herdr]"] {
-            let config: Config = toml::from_str(source).unwrap();
-            assert_eq!(config.ui.toast.herdr.position, ToastHerdrPosition::Island);
-        }
-    }
-
-    #[test]
-    fn toast_config_parses_island_and_bottom_right_escape_hatch() {
-        for (value, expected) in [
-            ("island", ToastHerdrPosition::Island),
-            ("bottom-right", ToastHerdrPosition::BottomRight),
-        ] {
-            let config: Config =
-                toml::from_str(&format!("[ui.toast.herdr]\nposition = \"{value}\"")).unwrap();
-            assert_eq!(config.ui.toast.herdr.position, expected);
-            assert_eq!(
-                serde_json::to_string(&expected).unwrap(),
-                format!("\"{value}\"")
-            );
-        }
     }
 
     #[test]
@@ -2202,16 +2126,41 @@ pane_history = true
     }
 
     #[test]
-    fn kitty_graphics_default_off_and_parse() {
-        let config = Config::default();
-        assert!(!config.experimental.kitty_graphics);
+    fn kitty_graphics_default_on_with_stable_opt_out() {
+        assert!(Config::default().kitty_graphics_enabled());
 
-        let toml = r#"
+        let config: Config = toml::from_str(
+            r#"
+[terminal]
+kitty_graphics = false
+"#,
+        )
+        .unwrap();
+        assert!(!config.kitty_graphics_enabled());
+    }
+
+    #[test]
+    fn legacy_experimental_kitty_graphics_setting_remains_compatible() {
+        let disabled: Config = toml::from_str(
+            r#"
+[experimental]
+kitty_graphics = false
+"#,
+        )
+        .unwrap();
+        assert!(!disabled.kitty_graphics_enabled());
+
+        let stable_setting_wins: Config = toml::from_str(
+            r#"
+[terminal]
+kitty_graphics = false
+
 [experimental]
 kitty_graphics = true
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(config.experimental.kitty_graphics);
+"#,
+        )
+        .unwrap();
+        assert!(!stable_setting_wins.kitty_graphics_enabled());
     }
 
     #[test]
@@ -2225,7 +2174,8 @@ switch_ascii_input_source_in_prefix = true
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(config.experimental.allow_nested);
-        assert!(config.experimental.kitty_graphics);
+        assert_eq!(config.experimental.kitty_graphics, Some(true));
+        assert!(config.kitty_graphics_enabled());
         assert!(config.experimental.pane_history);
         assert!(config.experimental.switch_ascii_input_source_in_prefix);
     }

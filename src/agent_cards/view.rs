@@ -667,6 +667,10 @@ mod tests {
     fn default_24_row_terminal_keeps_compact_identity_and_selected_trace() {
         let mut state = crate::app::state::AppState::test_new();
         crate::ui::compute_view(&mut state, ratatui::layout::Rect::new(0, 0, 100, 24));
+        // Server-side compute_view no longer computes sidebar geometry (that
+        // moved to the client shell), so set a representative sidebar rect
+        // manually: 25 columns wide, full terminal height.
+        state.view.sidebar_rect = ratatui::layout::Rect::new(0, 0, 25, 24);
         let (_, panel) = crate::ui::expanded_sidebar_sections(
             state.view.sidebar_rect,
             state.sidebar_section_split,

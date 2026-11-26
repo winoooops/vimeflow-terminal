@@ -1,4 +1,3 @@
-// Modified from herdr by the vimeflow project — see FORK.md
 use super::harness::*;
 
 #[test]
@@ -229,11 +228,11 @@ fn dead_server_cli_reports_one_session_aware_json_line() {
         &runtime_dir,
         &["--session", "foo", "workspace", "create"],
     );
-    assert_server_not_running(missing, &named_socket, "vimeflow session attach foo");
+    assert_server_not_running(missing, &named_socket, "herdr session attach foo");
 
     let stale_socket = runtime_dir.join("stale.sock");
     drop(UnixListener::bind(&stale_socket).unwrap());
-    let stale = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
+    let stale = Command::new(env!("CARGO_BIN_EXE_herdr"))
         .args(["workspace", "create"])
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_RUNTIME_DIR", &runtime_dir)
@@ -243,7 +242,7 @@ fn dead_server_cli_reports_one_session_aware_json_line() {
         .env_remove("HERDR_ENV")
         .output()
         .unwrap();
-    assert_server_not_running(stale, &stale_socket, "vimeflow");
+    assert_server_not_running(stale, &stale_socket, "herdr");
 
     cleanup_test_base(&base);
 }
@@ -266,7 +265,7 @@ fn integration_commands_run_locally_when_server_is_missing() {
         "test setup should start without extension file"
     );
 
-    let workspace_list = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
+    let workspace_list = Command::new(env!("CARGO_BIN_EXE_herdr"))
         .args(["workspace", "list"])
         .env("HERDR_SOCKET_PATH", &missing_socket)
         .env("HOME", &home_dir)
@@ -274,7 +273,7 @@ fn integration_commands_run_locally_when_server_is_missing() {
         .unwrap();
     assert_eq!(workspace_list.status.code(), Some(1));
 
-    let integration_install = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
+    let integration_install = Command::new(env!("CARGO_BIN_EXE_herdr"))
         .args(["integration", "install", "pi"])
         .env("HERDR_SOCKET_PATH", &missing_socket)
         .env("HOME", &home_dir)
@@ -286,7 +285,7 @@ fn integration_commands_run_locally_when_server_is_missing() {
         "integration install should write local files without a server"
     );
 
-    let integration_status = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
+    let integration_status = Command::new(env!("CARGO_BIN_EXE_herdr"))
         .args(["integration", "status"])
         .env("HERDR_SOCKET_PATH", &missing_socket)
         .env("HOME", &home_dir)
@@ -297,7 +296,7 @@ fn integration_commands_run_locally_when_server_is_missing() {
     assert!(status_stdout.contains("pi: current (v8)"));
     assert!(status_stdout.contains("claude: not installed"));
 
-    let integration_uninstall = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
+    let integration_uninstall = Command::new(env!("CARGO_BIN_EXE_herdr"))
         .args(["integration", "uninstall", "pi"])
         .env("HERDR_SOCKET_PATH", &missing_socket)
         .env("HOME", &home_dir)
@@ -329,7 +328,7 @@ fn integration_status_outdated_only_prints_action_for_legacy_install() {
     register_runtime_dir(&runtime_dir);
     let missing_socket = runtime_dir.join("missing.sock");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_herdr"))
         .args(["integration", "status", "--outdated-only"])
         .env("HERDR_SOCKET_PATH", &missing_socket)
         .env("HOME", &home_dir)
@@ -355,7 +354,7 @@ fn integration_status_rejects_unknown_flags() {
     register_runtime_dir(&runtime_dir);
     let missing_socket = runtime_dir.join("missing.sock");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_vimeflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_herdr"))
         .args(["integration", "status", "--wat"])
         .env("HERDR_SOCKET_PATH", &missing_socket)
         .env("HOME", &home_dir)
@@ -390,7 +389,7 @@ fn status_commands_report_client_and_server_versions() {
         "stdout: {full_stdout}"
     );
     assert!(
-        full_stdout.contains("  protocol: 20"),
+        full_stdout.contains("  protocol: 22"),
         "stdout: {full_stdout}"
     );
     assert!(full_stdout.contains("server:\n"), "stdout: {full_stdout}");
@@ -399,11 +398,19 @@ fn status_commands_report_client_and_server_versions() {
         "stdout: {full_stdout}"
     );
     assert!(
-        full_stdout.contains("  compatible: yes"),
+        full_stdout.contains("  private_protocol_compatible: yes"),
+        "stdout: {full_stdout}"
+    );
+    assert!(
+        full_stdout.contains("  endpoint_compatible: yes"),
         "stdout: {full_stdout}"
     );
     assert!(
         full_stdout.contains("  restart_needed: no"),
+        "stdout: {full_stdout}"
+    );
+    assert!(
+        full_stdout.contains("  server_binary_stale: no"),
         "stdout: {full_stdout}"
     );
     assert!(
@@ -423,7 +430,7 @@ fn status_commands_report_client_and_server_versions() {
         "stdout: {server_stdout}"
     );
     assert!(
-        server_stdout.contains("protocol: 20"),
+        server_stdout.contains("private_protocol: 22"),
         "stdout: {server_stdout}"
     );
 
@@ -435,7 +442,11 @@ fn status_commands_report_client_and_server_versions() {
         "stdout: {client_stdout}"
     );
     assert!(
-        client_stdout.contains("protocol: 20"),
+        client_stdout.contains("protocol: 22"),
+        "stdout: {client_stdout}"
+    );
+    assert!(
+        client_stdout.contains("endpoint_protocol_generation: 1"),
         "stdout: {client_stdout}"
     );
     assert!(
@@ -445,26 +456,32 @@ fn status_commands_report_client_and_server_versions() {
 
     let full_json = run_cli_json(&socket_path, &["status", "--json"]);
     assert_eq!(full_json["client"]["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(full_json["client"]["protocol"], 20);
+    assert_eq!(full_json["client"]["protocol"], 22);
+    assert_eq!(full_json["client"]["endpoint_protocol_generation"], 1);
     assert_eq!(full_json["server"]["status"], "running");
     assert_eq!(full_json["server"]["running"], true);
     assert_eq!(full_json["server"]["compatible"], true);
+    assert_eq!(full_json["server"]["endpoint_compatible"], true);
     assert_eq!(
         full_json["server"]["socket"],
         socket_path.display().to_string()
     );
     assert_eq!(full_json["server"]["restart_needed"], false);
+    assert_eq!(full_json["server"]["server_binary_stale"], false);
     assert_eq!(full_json["update"]["restart_needed"], false);
+    assert_eq!(full_json["update"]["server_binary_stale"], false);
 
     let server_json = run_cli_json(&socket_path, &["status", "server", "--json"]);
     assert_eq!(server_json["status"], "running");
     assert_eq!(server_json["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(server_json["protocol"], 20);
+    assert_eq!(server_json["protocol"], 22);
     assert_eq!(server_json["compatible"], true);
+    assert_eq!(server_json["endpoint_compatible"], true);
 
     let client_json = run_cli_json(&socket_path, &["status", "client", "--json"]);
     assert_eq!(client_json["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(client_json["protocol"], 20);
+    assert_eq!(client_json["protocol"], 22);
+    assert_eq!(client_json["endpoint_protocol_generation"], 1);
     assert!(client_json["binary"]
         .as_str()
         .is_some_and(|path| !path.is_empty()));
@@ -486,6 +503,10 @@ fn status_reports_not_running_when_server_socket_is_missing() {
     assert!(stdout.contains("  status: not running"), "stdout: {stdout}");
     assert!(stdout.contains("  restart_needed: no"), "stdout: {stdout}");
     assert!(
+        stdout.contains("  server_binary_stale: no"),
+        "stdout: {stdout}"
+    );
+    assert!(
         stdout.contains(&socket_path.display().to_string()),
         "stdout: {stdout}"
     );
@@ -498,7 +519,9 @@ fn status_reports_not_running_when_server_socket_is_missing() {
         socket_path.display().to_string()
     );
     assert_eq!(status_json["server"]["restart_needed"], false);
+    assert_eq!(status_json["server"]["server_binary_stale"], false);
     assert_eq!(status_json["update"]["restart_needed"], false);
+    assert_eq!(status_json["update"]["server_binary_stale"], false);
 
     cleanup_test_base(&base);
 }

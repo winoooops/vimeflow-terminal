@@ -2,7 +2,6 @@
 title: Agents
 description: See what Herdr can detect, how agent state works, and how integrations improve it.
 ---
-<!-- Modified from herdr by the vimeflow project — see FORK.md -->
 
 Herdr is built for running more than one coding agent at a time. Each agent stays in a real terminal pane with its shell, logs, prompts, and running processes intact. Herdr tracks which panes contain agents, rolls their state up to tabs and workspaces, and lets you jump straight to the pane that needs attention instead of polling every terminal by hand.
 
@@ -34,6 +33,7 @@ Automatic detection works out of the box for common coding agents. The table sho
 | Antigravity CLI | screen manifest | session |
 | Kiro CLI | screen manifest | none |
 | Maki | screen manifest | none |
+| Muse | screen manifest | none |
 
 Detected but less thoroughly tested: Gemini CLI and Cline. Unsupported agents still run normally as terminal processes. They just may not get rich state unless you add an integration or report state over the socket API.
 
@@ -106,75 +106,6 @@ herdr integration status
 ```
 
 Each supported agent has its own integration name and behavior. See [Integrations](/docs/integrations/) for the per-agent details and the full install list. If you are building an agent, the [custom integration guide](/docs/integrations/#integrate-your-own-agent) shows how to report lifecycle state without adding native support to Herdr.
-
-**Built-in agent watcher and titles.** This distribution starts its agent watcher with the Herdr server. It keeps the watcher state socket compatible with the standalone `herdr-agent-watcher` plugin, so existing watcher clients continue to work. It also derives pane labels from Claude Code, Codex, Kimi Code, and OpenCode session data. A label you rename manually remains yours; automatic title sync only updates labels it owns.
-
-Use the native watcher commands without opening a plugin pane:
-
-```bash
-herdr watcher status
-herdr watcher doctor
-herdr watcher sidebar
-herdr watcher claude-bridge enable
-herdr watcher claude-bridge disable
-herdr watcher kimi-consent on
-herdr watcher kimi-consent off
-herdr watcher kimi-consent status
-```
-
-Both built-in services are enabled by default. Their configuration is startup-only, so restart the Herdr server after changing it. `title_sync.interval_ms` must be a positive integer.
-
-```toml
-[agent_watcher]
-enabled = true
-
-[title_sync]
-enabled = true
-interval_ms = 1000
-```
-
-**Migrating from standalone plugins.** Disable the standalone twins before relying on the built-ins:
-
-```bash
-herdr plugin disable herdr-agent-watcher
-herdr plugin disable herdr-agent-title-sync
-herdr watcher doctor
-```
-
-Disabling leaves the plugin checkouts and state in place. You can re-enable them when returning to stock Herdr. If an enabled standalone twin remains registered while its built-in twin is enabled, `herdr watcher doctor` and the server startup log name the exact disable command. Herdr does not disable plugins automatically.
-
-## Agent cards in the sidebar
-
-The expanded sidebar shows each detected agent as a three-line card. The card combines Herdr's pane lifecycle state with optional watcher telemetry such as context use, tool calls, model, cache, cost, and recent traces. The focused pane expands when space permits; click its chevron to collapse or reopen it. If watcher telemetry is unavailable, navigation and lifecycle state continue to work and the card says `no telemetry`.
-
-Cards follow the existing Agents sort control. `spaces` keeps a flat workspace-order list, while `priority` puts agents needing attention first. Indexed and previous/next agent focus use the same visible order as the cards.
-
-These settings reload live:
-
-```toml
-[ui.sidebar]
-agents_view = "cards"      # default; use "legacy" for configurable rows
-agents_hide_idle = false   # hide seen idle agents from cards and focus indexes
-compact_rail_numbers = true # set false to show state dots without position numbers
-compact_rail_leading = "agent" # optional: "number", "none", or "agent"
-```
-
-In `agent` mode, compact Agent rows show two-character identity marks such as `Cl` and `Cx` beside their state dots. Workspace glance rows still follow `compact_rail_numbers`. When `compact_rail_leading` is omitted, Agent rows inherit `compact_rail_numbers`; the other values explicitly show numbers or no leading field.
-
-Override marks by canonical agent slug:
-
-```toml
-# Any Unicode string your terminal font renders: width 1-2; width-1 is padded; invalid entries fall back to the built-in mark with a diagnostic.
-[ui.sidebar.compact_rail_marks]
-claude = "C"
-codex = "CX"
-# gemini = "Ge"   # Gemini CLI
-# copilot = "Gh"  # GitHub Copilot CLI
-# kimi = "Ki"     # Kimi Code CLI
-# opencode = "Oc" # OpenCode
-```
-
-Switching to `legacy` restores the configurable `[ui.sidebar.agents]` row view. Agent row settings are ignored in cards mode and produce a configuration diagnostic when explicitly present. Compact-rail settings reload live and do not change row selection or click targets.
 
 ## Custom agent labels
 
