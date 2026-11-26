@@ -4607,7 +4607,7 @@ mod tests {
             assert_eq!(app.state.workspaces[0].active_tab, 0, "{label}");
             assert!(app.state.context_menu.is_none(), "{label}");
             assert!(!app.state.request_new_tab, "{label}");
-            assert!(app.state.tab_press.is_none(), "{label}");
+            assert!(app.state.tab_presses.is_empty(), "{label}");
         }
     }
 

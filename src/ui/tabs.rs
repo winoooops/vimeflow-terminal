@@ -602,8 +602,7 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 60, 1);
-        let content = tab_bar_content_area(&app, app.view.tab_bar_rect);
-        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, false);
+        let view = compute_tab_bar_view(&app, app.view.tab_bar_rect);
         app.view.tab_hit_areas = view.tab_hit_areas.clone();
 
         let backend = TestBackend::new(60, 1);
@@ -620,6 +619,7 @@ mod tests {
         );
         let status_x = 60 - display_width_u16("ZOOM · wintermute · 14:30");
         assert_eq!(buffer[(status_x, 0)].style().bg, Some(app.palette.accent));
+        let content = tab_bar_content_area(&app, app.view.tab_bar_rect);
         for rect in &view.tab_hit_areas {
             assert!(rect.x + rect.width <= content.x + content.width);
         }
@@ -637,8 +637,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("test")];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 40, 1);
-        let content = tab_bar_content_area(&app, app.view.tab_bar_rect);
-        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, false);
+        let view = compute_tab_bar_view(&app, app.view.tab_bar_rect);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(40, 1);
@@ -670,7 +669,7 @@ mod tests {
         let wide_enough = Rect::new(0, 0, MIN_TAB_STRIP_WIDTH + 2, 1);
         let content = tab_bar_content_area(&app, wide_enough);
         assert_eq!(content.width, MIN_TAB_STRIP_WIDTH);
-        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, true);
+        let view = compute_tab_bar_view(&app, wide_enough);
         assert!(view.tab_hit_areas[0].width >= MIN_TAB_WIDTH);
     }
 
@@ -693,13 +692,7 @@ mod tests {
         );
         assert_eq!(tab_bar_status_area(&app, app.view.tab_bar_rect), None);
 
-        let view = compute_tab_bar_view(
-            &app.workspaces[0],
-            tab_bar_content_area(&app, app.view.tab_bar_rect),
-            0,
-            true,
-            true,
-        );
+        let view = compute_tab_bar_view(&app, app.view.tab_bar_rect);
         assert!(view.tab_hit_areas[0].width > 0);
         assert!(view.new_tab_hit_area.width > 0);
     }
@@ -713,7 +706,7 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view = compute_tab_bar_view(&app, app.view.tab_bar_rect);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -743,7 +736,7 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view = compute_tab_bar_view(&app, app.view.tab_bar_rect);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);

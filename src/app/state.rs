@@ -1688,7 +1688,6 @@ pub struct AppState {
     pub show_agent_labels_on_pane_borders: bool,
     pub hide_tab_bar_when_single_tab: bool,
     pub tab_bar_position: TabBarPositionConfig,
-<<<<<<< HEAD
     pub tab_bar_style: crate::config::TabBarStyleConfig,
     pub island: crate::config::IslandConfig,
     pub island_anim: Option<IslandAnim>,
@@ -2078,7 +2077,6 @@ impl AppState {
             sidebar_collapsed_mode: crate::config::SidebarCollapsedModeConfig::Compact,
             sidebar_section_split: 0.5,
             agent_panel_sort: AgentPanelSort::Spaces,
-<<<<<<< HEAD
             agents_view: crate::config::AgentsViewConfig::Cards,
             agents_hide_idle: false,
             compact_rail_numbers: true,
@@ -2110,7 +2108,6 @@ impl AppState {
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
-<<<<<<< HEAD
             tab_bar_style: crate::config::TabBarStyleConfig::Island,
             island: crate::config::IslandConfig::default(),
             island_anim: None,
@@ -2534,7 +2531,6 @@ mod tests {
     use crossterm::event::KeyEvent;
 
     #[test]
-<<<<<<< HEAD
     fn island_spring_settles_in_tuned_window() {
         let mut spring = IslandSpring::new(1.0, 18.0);
         let mut ticks = 0;

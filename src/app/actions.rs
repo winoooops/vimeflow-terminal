@@ -4208,26 +4208,6 @@ mod tests {
         );
     }
 
-    fn insert_test_pane_graphics_layer(state: &mut AppState, pane_id: PaneId) {
-        state.pane_graphics_layers.insert(
-            pane_id,
-            crate::app::state::PaneGraphicsLayer::new(
-                crate::api::schema::PaneGraphicsFormat::Rgba,
-                1,
-                1,
-                vec![1, 2, 3, 4],
-                crate::api::schema::PaneGraphicsPlacementParams::default(),
-            ),
-        );
-    }
-
-    fn insert_test_pane_graphics_state(state: &mut AppState, pane_id: PaneId) {
-        insert_test_pane_graphics_layer(state, pane_id);
-        state
-            .pane_graphics_streams
-            .insert(pane_id, "test-stream".into());
-    }
-
     fn mark_linked_worktree(state: &mut AppState, ws_idx: usize) {
         state.workspaces[ws_idx].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: "repo-key".into(),

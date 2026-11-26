@@ -1,6 +1,7 @@
 // Modified from herdr by the vimeflow project — see FORK.md
 //! Integration tests for auto-detect launch behavior.
 
+#![cfg(unix)]
 #![cfg(not(target_os = "macos"))]
 
 mod support;

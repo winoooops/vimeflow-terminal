@@ -1,6 +1,8 @@
 // Modified from herdr by the vimeflow project — see FORK.md
 //! Cross-area integration tests for end-to-end persistence flows.
 
+#![cfg(unix)]
+
 mod support;
 
 use std::fs;

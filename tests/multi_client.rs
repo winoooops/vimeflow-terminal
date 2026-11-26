@@ -1,6 +1,8 @@
 // Modified from herdr by the vimeflow project — see FORK.md
 //! Integration tests for multi-client server behavior.
 
+#![cfg(unix)]
+
 mod support;
 
 use std::collections::VecDeque;

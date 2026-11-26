@@ -2508,6 +2508,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn remote_install_preserves_upstream_and_rejects_incompatible_sources() {
         use std::os::unix::fs::PermissionsExt;

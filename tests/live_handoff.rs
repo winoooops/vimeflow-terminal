@@ -1,4 +1,6 @@
 // Modified from herdr by the vimeflow project — see FORK.md
+#![cfg(unix)]
+
 mod support;
 
 use std::fs;
