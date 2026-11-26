@@ -3,7 +3,7 @@
 # The package keeps upstream's name so `herdr::` paths in tests and the
 # upstream-edit registry stay meaningful; only the executable is renamed.
 name = "herdr"
-version = "0.8.2"
+version = "0.9.0"
 edition = "2021"
 build = "build.rs"
 description = "terminal workspace manager for AI coding agents"
@@ -17,7 +17,7 @@ include = [
     "assets/sounds/*",
     "docs/next/api/herdr-api.schema.json",
     "skills/herdr/SKILL.md",
-    "website/install.ps1",
+    "distribution/install.ps1",
     "README.md",
     "LICENSE",
     "Cargo.toml",

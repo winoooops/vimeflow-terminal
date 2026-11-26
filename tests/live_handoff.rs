@@ -1,7 +1,6 @@
-// Modified from herdr by the vimeflow project — see FORK.md
 #![cfg(unix)]
 
-mod support;
+pub mod support;
 
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -15,8 +14,10 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use support::{
-    cleanup_test_base, client_handshake, register_runtime_dir, register_spawned_herdr_pid,
-    send_input, unregister_spawned_herdr_pid, wait_for_disconnect, wait_for_socket,
+    cleanup_test_base, client_shell_handshake, register_runtime_dir, register_spawned_herdr_pid,
+    send_client_shell_shift_enter, unregister_spawned_herdr_pid, wait_for_client_shell_bootstrap,
+    wait_for_message_variant, wait_for_socket, SERVER_MESSAGE_ENDPOINT_CONTROL,
+    SERVER_MESSAGE_SERVER_SHUTDOWN,
 };
 
 struct SpawnedHerdr {
@@ -60,10 +61,10 @@ fn spawn_server_with_env(
     api_socket: &Path,
     extra_env: &[(&str, &str)],
 ) -> SpawnedHerdr {
-    fs::create_dir_all(config_home.join("vimeflow")).unwrap();
+    fs::create_dir_all(config_home.join("herdr")).unwrap();
     fs::create_dir_all(runtime_dir).unwrap();
     fs::write(
-        config_home.join("vimeflow/config.toml"),
+        config_home.join("herdr/config.toml"),
         "onboarding = false\n",
     )
     .unwrap();
@@ -76,7 +77,7 @@ fn spawn_server_with_env(
             pixel_height: 0,
         })
         .unwrap();
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_vimeflow"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
@@ -103,10 +104,10 @@ fn spawn_named_session_server(
     runtime_dir: &Path,
     session_name: &str,
 ) -> SpawnedHerdr {
-    fs::create_dir_all(config_home.join("vimeflow-dev")).unwrap();
+    fs::create_dir_all(config_home.join("herdr-dev")).unwrap();
     fs::create_dir_all(runtime_dir).unwrap();
     fs::write(
-        config_home.join("vimeflow-dev/config.toml"),
+        config_home.join("herdr-dev/config.toml"),
         "onboarding = false\n",
     )
     .unwrap();
@@ -119,7 +120,7 @@ fn spawn_named_session_server(
             pixel_height: 0,
         })
         .unwrap();
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_vimeflow"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
@@ -137,10 +138,10 @@ fn spawn_named_session_server(
 }
 
 fn spawn_default_session_server(config_home: &Path, runtime_dir: &Path) -> SpawnedHerdr {
-    fs::create_dir_all(config_home.join("vimeflow-dev")).unwrap();
+    fs::create_dir_all(config_home.join("herdr-dev")).unwrap();
     fs::create_dir_all(runtime_dir).unwrap();
     fs::write(
-        config_home.join("vimeflow-dev/config.toml"),
+        config_home.join("herdr-dev/config.toml"),
         "onboarding = false\n",
     )
     .unwrap();
@@ -153,7 +154,7 @@ fn spawn_default_session_server(config_home: &Path, runtime_dir: &Path) -> Spawn
             pixel_height: 0,
         })
         .unwrap();
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_vimeflow"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
@@ -178,10 +179,10 @@ fn spawn_server_with_args_and_socket_env(
     api_socket_env: Option<&Path>,
     client_socket_env: Option<&Path>,
 ) -> SpawnedHerdr {
-    fs::create_dir_all(config_home.join("vimeflow-dev")).unwrap();
+    fs::create_dir_all(config_home.join("herdr-dev")).unwrap();
     fs::create_dir_all(runtime_dir).unwrap();
     fs::write(
-        config_home.join("vimeflow-dev/config.toml"),
+        config_home.join("herdr-dev/config.toml"),
         "onboarding = false\n",
     )
     .unwrap();
@@ -194,7 +195,7 @@ fn spawn_server_with_args_and_socket_env(
             pixel_height: 0,
         })
         .unwrap();
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_vimeflow"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
     if let Some(session_name) = session_name {
         cmd.arg("--session");
         cmd.arg(session_name);
@@ -611,13 +612,103 @@ fn live_server_holds_one_pty_master_fd_per_pane() {
     cleanup_test_base(&base);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn live_handoff_unknown_pane_exit_preserves_session_on_shutdown() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let api_socket = runtime_dir.join("herdr.sock");
+
+    let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
+    wait_for_socket(&api_socket, Duration::from_secs(10));
+    register_runtime_dir(&runtime_dir);
+
+    let created = request(
+        &api_socket,
+        serde_json::json!({
+            "id": "test:workspace:create",
+            "method": "workspace.create",
+            "params": {"cwd": "/tmp", "focus": true}
+        }),
+    );
+    let pane_id = created["result"]["root_pane"]["pane_id"]
+        .as_str()
+        .expect("root pane id")
+        .to_string();
+    let old_pid = spawned.child.process_id().expect("old server pid");
+
+    assert_ok(request(
+        &api_socket,
+        serde_json::json!({"id":"test:handoff","method":"server.live_handoff","params":{}}),
+    ));
+    let replacement_pid =
+        wait_for_replacement_server_pid(&runtime_dir, old_pid, Duration::from_secs(10));
+    drop(spawned);
+    wait_for_api(&api_socket, Duration::from_secs(10));
+
+    let process_info = request(
+        &api_socket,
+        serde_json::json!({
+            "id": "test:process-info",
+            "method": "pane.process_info",
+            "params": {"pane_id": pane_id}
+        }),
+    );
+    let shell_pid = process_info["result"]["process_info"]["shell_pid"]
+        .as_u64()
+        .expect("shell pid") as libc::pid_t;
+    assert_eq!(unsafe { libc::kill(shell_pid, libc::SIGHUP) }, 0);
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let panes = request(
+            &api_socket,
+            serde_json::json!({"id":"test:panes","method":"pane.list","params":{}}),
+        );
+        if panes["result"]["panes"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "handoff pane was not removed");
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert_ok(request(
+        &api_socket,
+        serde_json::json!({"id":"test:stop","method":"server.stop","params":{}}),
+    ));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Path::new(&format!("/proc/{replacement_pid}")).exists() {
+        assert!(Instant::now() < deadline, "replacement server did not stop");
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let session: serde_json::Value = serde_json::from_slice(
+        &fs::read(config_home.join("herdr-dev/session.json")).expect("saved session"),
+    )
+    .expect("valid session json");
+    assert_eq!(session["workspaces"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        session["workspaces"][0]["tabs"][0]["panes"]
+            .as_object()
+            .map(serde_json::Map::len),
+        Some(1)
+    );
+
+    cleanup_test_base(&base);
+}
+
 #[test]
 fn live_handoff_preserves_named_session_socket_paths() {
     let _lock = test_lock();
     let base = unique_test_dir();
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
-    let session_dir = config_home.join("vimeflow-dev/sessions/work");
+    let session_dir = config_home.join("herdr-dev/sessions/work");
     let api_socket = session_dir.join("herdr.sock");
     let client_socket = session_dir.join("herdr-client.sock");
 
@@ -633,7 +724,7 @@ fn live_handoff_preserves_named_session_socket_paths() {
     wait_for_api(&api_socket, Duration::from_secs(10));
     wait_for_socket(&client_socket, Duration::from_secs(5));
     assert!(
-        !config_home.join("vimeflow-dev/herdr.sock").exists(),
+        !config_home.join("herdr-dev/herdr.sock").exists(),
         "named handoff unexpectedly bound the default session API socket"
     );
 
@@ -650,10 +741,10 @@ fn live_handoff_ignores_leaked_default_socket_env_for_named_session() {
     let base = unique_test_dir();
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
-    let default_session_dir = config_home.join("vimeflow-dev");
+    let default_session_dir = config_home.join("herdr-dev");
     let default_api_socket = default_session_dir.join("herdr.sock");
     let default_client_socket = default_session_dir.join("herdr-client.sock");
-    let work_session_dir = config_home.join("vimeflow-dev/sessions/work");
+    let work_session_dir = config_home.join("herdr-dev/sessions/work");
     let work_api_socket = work_session_dir.join("herdr.sock");
     let work_client_socket = work_session_dir.join("herdr-client.sock");
 
@@ -697,7 +788,7 @@ fn live_handoff_preserves_client_socket_env_without_api_socket_env() {
     let base = unique_test_dir();
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
-    let api_socket = config_home.join("vimeflow-dev/herdr.sock");
+    let api_socket = config_home.join("herdr-dev/herdr.sock");
     let client_socket = runtime_dir.join("custom-client.sock");
 
     let spawned = spawn_server_with_args_and_socket_env(
@@ -732,8 +823,8 @@ fn live_handoff_preserves_installed_plugins() {
     let base = unique_test_dir();
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
-    let api_socket = config_home.join("vimeflow-dev/herdr.sock");
-    let registry_path = config_home.join("vimeflow-dev/plugins.json");
+    let api_socket = config_home.join("herdr-dev/herdr.sock");
+    let registry_path = config_home.join("herdr-dev/plugins.json");
     let existing_plugin = base.join("plugins/existing");
     let added_plugin = base.join("plugins/added");
     write_plugin_manifest(&existing_plugin, "test.live-handoff-existing");
@@ -864,16 +955,21 @@ fn live_handoff_preserves_pane_process_io() {
     assert_eq!(unsafe { libc::kill(child_pid as libc::pid_t, 0) }, 0);
     assert_eq!(unsafe { libc::kill(second_child_pid as libc::pid_t, 0) }, 0);
 
-    let protocol = request(
-        &api_socket,
-        serde_json::json!({"id":"test:protocol","method":"ping","params":{}}),
-    )["result"]["protocol"]
-        .as_u64()
-        .unwrap() as u32;
+    let endpoint_generation = support::CURRENT_ENDPOINT_PROTOCOL_GENERATION;
     let mut client_stream = UnixStream::connect(&client_socket).unwrap();
-    let (server_protocol, error) = client_handshake(&mut client_stream, protocol, 80, 24).unwrap();
-    assert_eq!(server_protocol, protocol);
-    assert!(error.is_none(), "client handshake failed: {error:?}");
+    let (server_generation, error) =
+        client_shell_handshake(&mut client_stream, endpoint_generation, 54, 23).unwrap();
+    assert_eq!(server_generation, endpoint_generation);
+    assert!(error.is_none(), "client shell handshake failed: {error:?}");
+    assert!(
+        wait_for_message_variant(
+            &mut client_stream,
+            Duration::from_secs(5),
+            SERVER_MESSAGE_ENDPOINT_CONTROL,
+        )
+        .unwrap(),
+        "client shell should receive a complete snapshot before handoff"
+    );
 
     assert_ok(request(
         &api_socket,
@@ -891,8 +987,13 @@ fn live_handoff_preserves_pane_process_io() {
     ));
     drop(spawned);
     assert!(
-        wait_for_disconnect(&mut client_stream, Duration::from_secs(5)).unwrap(),
-        "connected clients should disconnect during live handoff"
+        wait_for_message_variant(
+            &mut client_stream,
+            Duration::from_secs(5),
+            SERVER_MESSAGE_SERVER_SHUTDOWN,
+        )
+        .unwrap(),
+        "connected client shell should receive live-handoff shutdown"
     );
     thread::sleep(Duration::from_millis(300));
     wait_for_api(&api_socket, Duration::from_secs(10));
@@ -937,6 +1038,22 @@ fn live_handoff_preserves_pane_process_io() {
         Duration::from_secs(5),
     );
     wait_for_output(&api_socket, &second_pane_id, "second:after-handoff-sec");
+
+    let mut reattached_shell = UnixStream::connect(&client_socket).unwrap();
+    let (server_generation, error) = client_shell_handshake(
+        &mut reattached_shell,
+        support::CURRENT_ENDPOINT_PROTOCOL_GENERATION,
+        54,
+        23,
+    )
+    .unwrap();
+    assert_eq!(
+        server_generation,
+        support::CURRENT_ENDPOINT_PROTOCOL_GENERATION
+    );
+    assert!(error.is_none(), "reattached client shell failed: {error:?}");
+    wait_for_client_shell_bootstrap(&mut reattached_shell, Duration::from_secs(5))
+        .expect("fresh client shell should receive restored snapshot before pane content");
 
     let _ = request(
         &api_socket,
@@ -1008,12 +1125,6 @@ pathlib.Path({received:?}).write_text(data.hex())
     ));
     support::wait_for_file(&ready_marker, Duration::from_secs(5));
 
-    let protocol = request(
-        &api_socket,
-        serde_json::json!({"id":"test:protocol","method":"ping","params":{}}),
-    )["result"]["protocol"]
-        .as_u64()
-        .unwrap() as u32;
     assert_ok(request(
         &api_socket,
         serde_json::json!({"id":"test:handoff","method":"server.live_handoff","params":{}}),
@@ -1023,10 +1134,21 @@ pathlib.Path({received:?}).write_text(data.hex())
     wait_for_socket(&client_socket, Duration::from_secs(5));
 
     let mut client_stream = UnixStream::connect(&client_socket).unwrap();
-    let (server_protocol, error) = client_handshake(&mut client_stream, protocol, 80, 24).unwrap();
-    assert_eq!(server_protocol, protocol);
-    assert!(error.is_none(), "client handshake failed: {error:?}");
-    send_input(&mut client_stream, b"\x1b[13;2u").unwrap();
+    let (server_generation, error) = client_shell_handshake(
+        &mut client_stream,
+        support::CURRENT_ENDPOINT_PROTOCOL_GENERATION,
+        54,
+        23,
+    )
+    .unwrap();
+    assert_eq!(
+        server_generation,
+        support::CURRENT_ENDPOINT_PROTOCOL_GENERATION
+    );
+    assert!(error.is_none(), "client shell handshake failed: {error:?}");
+    wait_for_client_shell_bootstrap(&mut client_stream, Duration::from_secs(5))
+        .expect("client shell should receive restored state before sending input");
+    send_client_shell_shift_enter(&mut client_stream, &pane_id).unwrap();
 
     wait_for_file_contains(&received_marker, "1b5b31333b3275", Duration::from_secs(5));
 
@@ -1099,12 +1221,6 @@ pathlib.Path({received:?}).write_text(data.hex())
     ));
     support::wait_for_file(&ready_marker, Duration::from_secs(5));
 
-    let protocol = request(
-        &api_socket,
-        serde_json::json!({"id":"test:protocol","method":"ping","params":{}}),
-    )["result"]["protocol"]
-        .as_u64()
-        .unwrap() as u32;
     assert_ok(request(
         &api_socket,
         serde_json::json!({"id":"test:handoff","method":"server.live_handoff","params":{}}),
@@ -1114,10 +1230,21 @@ pathlib.Path({received:?}).write_text(data.hex())
     wait_for_socket(&client_socket, Duration::from_secs(5));
 
     let mut client_stream = UnixStream::connect(&client_socket).unwrap();
-    let (server_protocol, error) = client_handshake(&mut client_stream, protocol, 80, 24).unwrap();
-    assert_eq!(server_protocol, protocol);
-    assert!(error.is_none(), "client handshake failed: {error:?}");
-    send_input(&mut client_stream, b"\x1b[13;2u").unwrap();
+    let (server_generation, error) = client_shell_handshake(
+        &mut client_stream,
+        support::CURRENT_ENDPOINT_PROTOCOL_GENERATION,
+        54,
+        23,
+    )
+    .unwrap();
+    assert_eq!(
+        server_generation,
+        support::CURRENT_ENDPOINT_PROTOCOL_GENERATION
+    );
+    assert!(error.is_none(), "client shell handshake failed: {error:?}");
+    wait_for_client_shell_bootstrap(&mut client_stream, Duration::from_secs(5))
+        .expect("client shell should receive restored state before sending input");
+    send_client_shell_shift_enter(&mut client_stream, &pane_id).unwrap();
 
     wait_for_file_contains(
         &received_marker,
@@ -1607,10 +1734,10 @@ fn live_handoff_preserves_http_servers_across_multiple_sessions() {
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
     let sessions = [
-        (None, config_home.join("vimeflow-dev/herdr.sock")),
+        (None, config_home.join("herdr-dev/herdr.sock")),
         (
             Some("work"),
-            config_home.join("vimeflow-dev/sessions/work/herdr.sock"),
+            config_home.join("herdr-dev/sessions/work/herdr.sock"),
         ),
     ];
     let mut spawned = Vec::new();
