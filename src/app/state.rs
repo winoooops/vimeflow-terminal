@@ -680,12 +680,27 @@ impl Palette {
 pub struct ViewState {
     pub terminal_area: Rect,
     pub pane_infos: Vec<PaneInfo>,
+    pub sidebar_rect: Rect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Navigate,
     Terminal,
+}
+
+impl Mode {
+    /// Whether keys in this mode are commands/navigation (an ASCII input
+    /// source is wanted) rather than free text.
+    pub(crate) fn wants_ascii_input(self) -> bool {
+        matches!(self, Mode::Navigate)
+    }
+}
+
+impl AppState {
+    pub(crate) fn wants_ascii_input(&self) -> bool {
+        self.mode.wants_ascii_input() || self.island_panel_open
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -725,6 +740,7 @@ pub struct ToastNotification {
     pub context: String,
     pub position: Option<crate::config::ToastHerdrPosition>,
     pub target: Option<ToastTarget>,
+    pub island_record_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -809,6 +825,14 @@ pub(crate) enum IslandStage {
     Pill,
     Badge,
     Panel,
+}
+
+pub(crate) fn validate_island_bell(mark: &str) -> String {
+    match unicode_width::UnicodeWidthStr::width(mark) {
+        1 => format!("{mark} "),
+        2 => mark.to_string(),
+        _ => "! ".to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1032,6 +1056,10 @@ pub struct AppState {
     /// Terminal runtimes that should be shut down by the app/runtime layer
     /// after state has detached their terminal metadata.
     pub(crate) terminal_runtime_shutdowns: Vec<crate::terminal::TerminalId>,
+    pub sidebar_section_split: f32,
+    pub tab_bar_style: crate::config::TabBarStyleConfig,
+    pub island: crate::config::IslandConfig,
+    pub switch_ascii_input_source_in_prefix: bool,
 }
 
 impl AppState {
@@ -1185,6 +1213,7 @@ impl AppState {
             view: ViewState {
                 terminal_area: Rect::default(),
                 pane_infos: Vec::new(),
+                sidebar_rect: Rect::default(),
             },
             update_available: None,
             update_install_command: "herdr update".into(),
@@ -1262,6 +1291,10 @@ impl AppState {
             session_dirty: false,
             title_sync_generation: 0,
             terminal_runtime_shutdowns: Vec::new(),
+            sidebar_section_split: 0.5,
+            tab_bar_style: crate::config::TabBarStyleConfig::default(),
+            island: crate::config::IslandConfig::default(),
+            switch_ascii_input_source_in_prefix: false,
         }
     }
 

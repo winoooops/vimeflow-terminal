@@ -421,6 +421,45 @@ pub(crate) fn render_terminal_virtual(
     (buffer, cursor)
 }
 
+/// Full-frame render convenience wrapper for tests: computes the view layout,
+/// then renders the tab surface into a virtual buffer.
+#[cfg(test)]
+pub(crate) fn render_virtual_with_runtime_registry(
+    app_state: &mut AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+    area: Rect,
+    resize_panes: bool,
+    cell_size: crate::kitty_graphics::HostCellSize,
+) -> (ratatui::buffer::Buffer, Option<CursorState>) {
+    crate::ui::compute_view_with_cell_size(app_state, terminal_runtimes, area, cell_size);
+    let (buf, cursor, _, _) = render_tab_surface_virtual(
+        app_state,
+        terminal_runtimes,
+        None,
+        area,
+        resize_panes,
+        cell_size,
+    );
+    (buf, cursor)
+}
+
+/// Convenience wrapper for tests that don't need a runtime registry.
+#[cfg(test)]
+pub(crate) fn render_virtual(
+    app_state: &mut AppState,
+    area: Rect,
+    resize_panes: bool,
+) -> (ratatui::buffer::Buffer, Option<CursorState>) {
+    let terminal_runtimes = TerminalRuntimeRegistry::new();
+    render_virtual_with_runtime_registry(
+        app_state,
+        &terminal_runtimes,
+        area,
+        resize_panes,
+        crate::kitty_graphics::HostCellSize::default(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

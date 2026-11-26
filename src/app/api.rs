@@ -1264,6 +1264,7 @@ impl App {
                         context: body.unwrap_or_default(),
                         position: params.position,
                         target: None,
+                        island_record_id: None,
                     });
                     self.sync_toast_deadline(previous_toast);
                     NotificationShowReason::Shown
@@ -2433,6 +2434,7 @@ mod tests {
                 workspace_id,
                 pane_id: root,
             }),
+            island_record_id: None,
         });
 
         app.handle_internal_event(AppEvent::StateChanged {

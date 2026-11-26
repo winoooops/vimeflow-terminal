@@ -355,6 +355,7 @@ impl App {
                 context: format!("focused pane {public_pane_id}"),
                 position: None,
                 target: None,
+                island_record_id: None,
             });
         }
         Ok(())

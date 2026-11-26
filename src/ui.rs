@@ -32,9 +32,9 @@ pub(crate) use self::scrollbar::{
     scrollbar_thumb_grab_offset,
 };
 pub(crate) use self::sidebar::{
-    agent_panel_entries_from, expanded_sidebar_sections, resolved_token_spans, sidebar_agent_rows,
-    sidebar_section_divider_rect, sidebar_space_rows, AgentPanelEntry, AgentTokenContext,
-    ResolvedToken, ResolvedTokenKind, SpaceTokenContext,
+    agent_panel_entries_from, agent_panel_items_rect, expanded_sidebar_sections,
+    resolved_token_spans, sidebar_agent_rows, sidebar_section_divider_rect, sidebar_space_rows,
+    AgentPanelEntry, AgentTokenContext, ResolvedToken, ResolvedTokenKind, SpaceTokenContext,
 };
 use self::status::copy_feedback_rect;
 pub(crate) use self::status::{render_config_diagnostic_buffer, render_copy_feedback_buffer};
@@ -47,6 +47,14 @@ pub(crate) use self::widgets::{centered_popup_rect, modal_stack_areas};
 
 use crate::app::AppState;
 use crate::terminal::TerminalRuntimeRegistry;
+
+/// Convenience wrapper for tests: creates an empty runtime registry and
+/// delegates to [`compute_view_with_runtime_registry`].
+#[cfg(test)]
+pub fn compute_view(app: &mut AppState, area: Rect) {
+    let terminal_runtimes = TerminalRuntimeRegistry::new();
+    compute_view_with_runtime_registry(app, &terminal_runtimes, area);
+}
 
 pub fn compute_view_with_runtime_registry(
     app: &mut AppState,
@@ -103,6 +111,7 @@ fn compute_view_internal(
     app.view = crate::app::ViewState {
         terminal_area: area,
         pane_infos,
+        sidebar_rect: Rect::default(),
     };
 }
 

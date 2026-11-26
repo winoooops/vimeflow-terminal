@@ -382,6 +382,7 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
     );
 
     diagnostics.extend(config.theme.diagnostics());
+    diagnostics.extend(agent_rows_config_diagnostic(&value, &config));
 
     Ok(LoadedConfig {
         config,

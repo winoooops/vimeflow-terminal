@@ -162,6 +162,16 @@ impl App {
         };
         tab.set_custom_name(params.label.clone());
         crate::logging::tab_renamed(&workspace_id, &tab_id);
+        if self.state.active == Some(ws_idx) {
+            if self.state.island.display == crate::config::IslandDisplayConfig::Labels
+                || self.state.island.active_title
+            {
+                // A renamed label changes the animated endpoint geometry while
+                // the in-flight springs still target pre-rename widths; snap
+                // instead of settling against obsolete targets.
+                self.clear_island_animation();
+            }
+        }
         self.schedule_session_save();
         self.emit_event(EventEnvelope {
             event: EventKind::TabRenamed,
@@ -204,6 +214,9 @@ impl App {
         let tabs = self.tab_list_info(ws_idx);
         if moved {
             self.schedule_session_save();
+            if self.state.active == Some(ws_idx) {
+                self.clear_island_animation();
+            }
             self.emit_event(EventEnvelope {
                 event: EventKind::TabMoved,
                 data: EventData::TabMoved {
@@ -351,7 +364,7 @@ mod tests {
     fn api_layout_apply_clears_island_animation_up_front() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         app.state.workspaces = vec![Workspace::test_new("tabs")];
         app.state.active = Some(0);
         app.state.island_anim = Some(island_anim());
@@ -371,7 +384,7 @@ mod tests {
     fn api_pane_move_clears_island_animation_up_front() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         app.state.workspaces = vec![Workspace::test_new("tabs")];
         app.state.active = Some(0);
         app.state.island_anim = Some(island_anim());
@@ -392,7 +405,7 @@ mod tests {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
             &Config::default(),
-            true,
+            crate::app::AppPolicy::TEST,
             None,
             api_rx,
             crate::api::EventHub::default(),
@@ -424,7 +437,7 @@ mod tests {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
             &Config::default(),
-            true,
+            crate::app::AppPolicy::TEST,
             None,
             api_rx,
             crate::api::EventHub::default(),
@@ -543,7 +556,7 @@ mod tests {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
             &Config::default(),
-            true,
+            crate::app::AppPolicy::TEST,
             None,
             api_rx,
             crate::api::EventHub::default(),

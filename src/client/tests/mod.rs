@@ -546,7 +546,7 @@ fn client_error_display_detached_default_session_reattach_hint() {
     };
     let msg = err.to_string();
     assert!(
-        msg.contains("Run `herdr` to reattach"),
+        msg.contains("Run `vimeflow` to reattach"),
         "should suggest default reattach command: {msg}"
     );
 }
@@ -561,7 +561,7 @@ fn client_error_display_detached_named_session_reattach_hint() {
     };
     let msg = err.to_string();
     assert!(
-        msg.contains("Run `herdr session attach work` to reattach"),
+        msg.contains("Run `vimeflow session attach work` to reattach"),
         "should suggest named session reattach command: {msg}"
     );
 }

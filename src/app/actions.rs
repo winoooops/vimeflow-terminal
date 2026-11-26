@@ -17,8 +17,8 @@ use crate::workspace::WorkspaceGitStatus;
 
 use super::api_helpers::pane_agent_status;
 use super::state::{
-    AgentNotificationDelivery, AppState, Mode, PaneFocusTarget, PendingAgentNotification,
-    ToastKind, ToastNotification, ToastTarget,
+    AgentNotificationDelivery, AppState, IslandRecord, Mode, PaneFocusTarget,
+    PendingAgentNotification, ToastKind, ToastNotification, ToastTarget,
 };
 
 fn is_background_completion_transition(prev_state: AgentState, new_state: AgentState) -> bool {
@@ -1599,6 +1599,7 @@ impl AppState {
                         context: crate::update::update_install_instruction(&install_command),
                         position: None,
                         target: None,
+                        island_record_id: None,
                     });
                 }
                 Vec::new()
@@ -1631,6 +1632,7 @@ impl AppState {
                         context: agent_list,
                         position: None,
                         target: None,
+                        island_record_id: None,
                     });
                 }
                 Vec::new()
@@ -2096,6 +2098,7 @@ impl AppState {
                     workspace_id: workspace_id.clone(),
                     pane_id,
                 }),
+                island_record_id: None,
             }
         };
         let toast = (!is_active_tab).then(build_toast);
@@ -4225,5 +4228,99 @@ impl AppState {
             .island_panel_list
             .highlighted
             .min(self.island_records.len().saturating_sub(1));
+    }
+
+    const ISLAND_RECORD_CAPACITY: usize = 50;
+
+    pub(crate) fn island_bell_text(&self) -> Option<String> {
+        if self.island_records.is_empty() {
+            return None;
+        }
+        let unread = self
+            .island_records
+            .iter()
+            .filter(|record| !record.read)
+            .count();
+        let count = if unread > 9 {
+            "9+".to_string()
+        } else {
+            unread.to_string()
+        };
+        Some(format!(
+            "{}{}",
+            super::state::validate_island_bell(&self.island.bell),
+            count
+        ))
+    }
+
+    fn island_bell_width(&self) -> usize {
+        self.island_bell_text()
+            .as_deref()
+            .map_or(0, unicode_width::UnicodeWidthStr::width)
+    }
+
+    fn clear_island_animation_if_bell_width_changed(&mut self, previous_width: usize) {
+        if self.island_bell_width() != previous_width {
+            self.island_anim = None;
+        }
+    }
+
+    fn clear_orphaned_island_toast(&mut self) {
+        let orphaned = self
+            .toast
+            .as_ref()
+            .and_then(|toast| toast.island_record_id)
+            .is_some_and(|id| !self.island_records.iter().any(|record| record.id == id));
+        if orphaned {
+            self.toast = None;
+        }
+    }
+
+    pub(crate) fn push_island_record(&mut self, mut record: IslandRecord) -> Option<u64> {
+        let previous_bell_width = self.island_bell_width();
+        let id = self.next_island_record_id.checked_add(1)?;
+        self.next_island_record_id = id;
+        record.id = id;
+        record.read = false;
+        self.island_records.retain(|existing| {
+            existing.pane_id != record.pane_id || existing.reason != record.reason
+        });
+        self.island_records.push_front(record);
+        self.island_records.truncate(Self::ISLAND_RECORD_CAPACITY);
+        self.clamp_island_panel_selection();
+        self.clear_orphaned_island_toast();
+        self.clear_island_animation_if_bell_width_changed(previous_bell_width);
+        Some(id)
+    }
+
+    pub(crate) fn open_island_record(&mut self, record_id: u64) -> bool {
+        let Some(record) = self
+            .island_records
+            .iter()
+            .find(|record| record.id == record_id)
+            .cloned()
+        else {
+            return false;
+        };
+        let Some(ws_idx) = self
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.find_tab_index_for_pane(record.pane_id).is_some())
+        else {
+            return false;
+        };
+
+        let previous_bell_width = self.island_bell_width();
+        if let Some(record) = self
+            .island_records
+            .iter_mut()
+            .find(|record| record.id == record_id)
+        {
+            record.read = true;
+        }
+        self.clear_island_animation_if_bell_width_changed(previous_bell_width);
+        self.focus_pane_in_workspace(ws_idx, record.pane_id);
+        self.mark_active_tab_seen();
+        true
     }
 }

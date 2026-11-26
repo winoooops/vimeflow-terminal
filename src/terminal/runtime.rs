@@ -453,6 +453,11 @@ impl TerminalRuntime {
         self.0.try_send_bytes(bytes)
     }
 
+    #[cfg(any(unix, test))]
+    pub fn input_state(&self) -> Option<crate::pane::InputState> {
+        self.0.input_state()
+    }
+
     pub fn queue_user_input_submission(
         &self,
         text: Bytes,

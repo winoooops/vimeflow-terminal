@@ -52,6 +52,17 @@ pub use self::{
     terminal::{ScrollMetrics, TerminalCursorState},
 };
 
+/// Stub: aggregate input state read tracking was removed in the client-rendered
+/// shell architecture.  Tests that relied on it compile but assert trivially.
+#[cfg(test)]
+pub fn aggregate_input_state_reads() -> usize {
+    0
+}
+
+/// Stub: see [`aggregate_input_state_reads`].
+#[cfg(test)]
+pub fn reset_aggregate_input_state_reads() {}
+
 const RELEASE_REACQUIRE_SUPPRESSION: std::time::Duration = std::time::Duration::from_secs(1);
 const TERMINAL_COMPRESSION_IDLE: std::time::Duration = std::time::Duration::from_millis(250);
 const TERMINAL_COMPRESSION_STEP: std::time::Duration = std::time::Duration::from_millis(1);

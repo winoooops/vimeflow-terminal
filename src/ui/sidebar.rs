@@ -66,6 +66,34 @@ pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, 
     )
 }
 
+const AGENT_PANEL_HEADER_ROWS: u16 = 3;
+
+pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
+    if area.width == 0 || area.height <= AGENT_PANEL_HEADER_ROWS {
+        return Rect::default();
+    }
+
+    let body_y = area.y.saturating_add(AGENT_PANEL_HEADER_ROWS);
+    let body_height = (area.y + area.height).saturating_sub(body_y);
+    let body_width = area.width.saturating_sub(u16::from(has_scrollbar));
+    Rect::new(area.x, body_y, body_width, body_height)
+}
+
+pub(crate) fn agent_panel_items_rect(
+    _app: &crate::app::state::AppState,
+    area: Rect,
+    has_scrollbar: bool,
+) -> Rect {
+    let mut body = agent_panel_body_rect(area, has_scrollbar);
+    if _app.agents_view == crate::config::AgentsViewConfig::Cards
+        && _app.agents_hide_idle
+    {
+        // Reserve a row for the hidden-idle-agents indicator when applicable.
+        body.height = body.height.saturating_sub(1);
+    }
+    body
+}
+
 pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect {
     let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
     if content.width == 0 || content.height < 6 {

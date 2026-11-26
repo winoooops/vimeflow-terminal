@@ -162,6 +162,7 @@ pub struct App {
     pub(crate) config_reloaded_from_disk: bool,
     client_shell_keybindings_profile: Option<String>,
     endpoint_commands: custom_commands::EndpointCommandRegistry,
+    prefix_input_source_active_sent: bool,
 }
 
 pub(crate) const APP_EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -472,6 +473,7 @@ impl App {
             view: state::ViewState {
                 terminal_area: Rect::default(),
                 pane_infos: Vec::new(),
+                sidebar_rect: Rect::default(),
             },
             update_available,
             update_install_command,
@@ -535,6 +537,12 @@ impl App {
             session_dirty: false,
             title_sync_generation: 0,
             terminal_runtime_shutdowns: Vec::new(),
+            sidebar_section_split: 0.5,
+            tab_bar_style: crate::config::TabBarStyleConfig::default(),
+            island: crate::config::IslandConfig::default(),
+            switch_ascii_input_source_in_prefix: config
+                .experimental
+                .switch_ascii_input_source_in_prefix,
         };
 
         state.terminals = restored_terminals;
@@ -633,6 +641,7 @@ impl App {
             config_reloaded_from_disk: false,
             client_shell_keybindings_profile,
             endpoint_commands,
+            prefix_input_source_active_sent: false,
         };
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
         app.configure_window_title(&config.ui.window_title);
@@ -968,6 +977,7 @@ impl App {
                     context: "using config.toml".to_string(),
                     position: None,
                     target: None,
+                    island_record_id: None,
                 });
             }
         } else {
@@ -980,6 +990,7 @@ impl App {
                     context: "with warnings".to_string(),
                     position: None,
                     target: None,
+                    island_record_id: None,
                 });
             }
         }
@@ -1001,17 +1012,39 @@ impl App {
     }
 
     pub(crate) fn sync_prefix_input_source(&mut self) {
-        // Prefix input source synchronization is a client-side concern in
-        // the split architecture.  The monolithic-path fields
-        // (switch_ascii_input_source_in_prefix on AppState,
-        // PrefixInputSource event) will be wired when the full prefix
-        // input-source feature lands on the server state.  For now this is
-        // intentionally a no-op so callers compile.
+        let active =
+            self.state.wants_ascii_input() && self.state.switch_ascii_input_source_in_prefix;
+        if active == self.prefix_input_source_active_sent {
+            return;
+        }
+        match self
+            .event_tx
+            .try_send(crate::events::AppEvent::PrefixInputSource { active })
+        {
+            Ok(()) => self.prefix_input_source_active_sent = active,
+            Err(err) => tracing::warn!(active, %err, "failed to queue prefix input-source change"),
+        }
     }
 
     pub(crate) fn close_island_panel(&mut self) {
         self.state.set_island_panel_open(false);
         self.sync_prefix_input_source();
+    }
+
+    /// Route text input to the popup pane (or the focused terminal pane when no
+    /// popup is open).  Test-only replacement for the removed headless input
+    /// pipeline.
+    #[cfg(test)]
+    pub(crate) fn handle_text_commit_headless(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        if let Some(popup) = &self.state.popup_pane {
+            if let Some(runtime) = self.terminal_runtimes.get(&popup.terminal_id) {
+                let _ = runtime.try_send_bytes(bytes::Bytes::copy_from_slice(text.as_bytes()));
+            }
+            return;
+        }
     }
 }
 #[cfg(test)]
@@ -1238,6 +1271,7 @@ mod tests {
             context: "background · 2".to_string(),
             position: None,
             target: None,
+            island_record_id: None,
         });
 
         let response =
