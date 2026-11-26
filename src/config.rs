@@ -23,10 +23,12 @@ pub use self::{
     },
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, AgentWatcherConfig, Config,
-        ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig,
-        PaneBordersConfig, ShellModeConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle,
-        TabBarPositionConfig, TitleSyncConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,
-        ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
+        ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig, IslandArrivalsConfig,
+        IslandCapsConfig, IslandConfig, IslandDisplayConfig, IslandMotionConfig,
+        IslandPositionConfig, NewTerminalCwdConfig, PaneBordersConfig, ShellModeConfig,
+        SidebarCollapsedModeConfig, StatusIndicatorStyle, TabBarPositionConfig, TabBarStyleConfig,
+        TitleSyncConfig, ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition,
+        UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, AgentsViewConfig, SidebarConfig,

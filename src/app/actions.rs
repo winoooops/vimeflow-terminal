@@ -1810,6 +1810,7 @@ impl AppState {
             AppEvent::TabBarCommandFinished { .. } => Vec::new(),
             AppEvent::PluginCommandFinished { .. } => Vec::new(),
             AppEvent::TitleSyncResolved { .. } => Vec::new(),
+            AppEvent::PrefixInputSource { .. } => Vec::new(),
         }
     }
 
@@ -4196,5 +4197,33 @@ mod tests {
         assert!(!deferred);
         assert_eq!(state.workspaces.len(), 1);
         assert_eq!(state.workspaces[0].display_name(), "notes");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Island panel helpers
+// ---------------------------------------------------------------------------
+
+impl AppState {
+    pub(crate) fn set_island_panel_open(&mut self, open: bool) {
+        self.island_panel_open = open
+            && self.popup_pane.is_none()
+            && !self.island_records.is_empty();
+        self.clamp_island_panel_selection();
+    }
+
+    pub(crate) fn toggle_island_panel(&mut self) {
+        if self.island_panel_open {
+            self.set_island_panel_open(false);
+        } else {
+            self.set_island_panel_open(true);
+        }
+    }
+
+    fn clamp_island_panel_selection(&mut self) {
+        self.island_panel_list.highlighted = self
+            .island_panel_list
+            .highlighted
+            .min(self.island_records.len().saturating_sub(1));
     }
 }

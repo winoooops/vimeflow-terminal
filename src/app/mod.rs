@@ -23,7 +23,6 @@ mod popup;
 mod runtime;
 mod session;
 pub mod state;
-mod island_stubs;
 mod pane_label;
 mod tab_bar_status;
 mod terminal_targets;
@@ -153,6 +152,7 @@ pub struct App {
     pub(crate) persist_pane_history: bool,
     /// Last render-loop attempt, including a throttled hidden-only PTY skip.
     pub(crate) last_render_at: Option<Instant>,
+    next_island_animation_tick: Option<Instant>,
     /// Last attempt that could update a connected presentation surface.
     pub(crate) last_presentation_at: Option<Instant>,
     pub render_notify: Arc<Notify>,
@@ -480,6 +480,11 @@ impl App {
             config_diagnostic,
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
+            island_records: std::collections::VecDeque::new(),
+            island_panel_open: false,
+            island_panel_list: state::MenuListState::new(0),
+            next_island_record_id: 0,
+            island_anim: None,
             outer_terminal_focus: None,
             prefix_code,
             prefix_mods,
@@ -529,7 +534,6 @@ impl App {
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             session_dirty: false,
             title_sync_generation: 0,
-            island_records: std::collections::VecDeque::new(),
             terminal_runtime_shutdowns: Vec::new(),
         };
 
@@ -616,6 +620,7 @@ impl App {
             window_title_template: None,
             persist_pane_history: config.experimental.pane_history,
             last_render_at: None,
+            next_island_animation_tick: None,
             last_presentation_at: None,
             api_rx,
             event_hub,
@@ -984,6 +989,29 @@ impl App {
             status,
             diagnostics,
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Island animation & panel helpers
+    // -----------------------------------------------------------------------
+
+    pub(crate) fn clear_island_animation(&mut self) {
+        self.state.island_anim = None;
+        self.next_island_animation_tick = None;
+    }
+
+    pub(crate) fn sync_prefix_input_source(&mut self) {
+        // Prefix input source synchronization is a client-side concern in
+        // the split architecture.  The monolithic-path fields
+        // (switch_ascii_input_source_in_prefix on AppState,
+        // PrefixInputSource event) will be wired when the full prefix
+        // input-source feature lands on the server state.  For now this is
+        // intentionally a no-op so callers compile.
+    }
+
+    pub(crate) fn close_island_panel(&mut self) {
+        self.state.set_island_panel_open(false);
+        self.sync_prefix_input_source();
     }
 }
 #[cfg(test)]

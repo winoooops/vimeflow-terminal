@@ -779,6 +779,139 @@ pub(crate) struct PaneFocusTarget {
     pub pane_id: PaneId,
 }
 
+// ---------------------------------------------------------------------------
+// Island notification types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IslandReason {
+    TurnComplete,
+    Blocked,
+}
+
+// The private v1 record keeps detected-agent identity for later reason styling.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IslandRecord {
+    pub(crate) id: u64,
+    pub(crate) workspace_id: String,
+    pub(crate) tab_id: String,
+    pub(crate) pane_id: PaneId,
+    pub(crate) agent: Option<crate::detect::Agent>,
+    pub(crate) reason: IslandReason,
+    pub(crate) text: String,
+    pub(crate) at: std::time::SystemTime,
+    pub(crate) read: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IslandStage {
+    Pill,
+    Badge,
+    Panel,
+}
+
+// ---------------------------------------------------------------------------
+// Island animation spring physics
+// ---------------------------------------------------------------------------
+
+pub(crate) const ISLAND_SPRING_STIFFNESS: f32 = 6_000.0;
+const ISLAND_SPRING_DAMPING_RATIO: f32 = 1.0;
+const ISLAND_SPRING_SUBSTEPS: usize = 4;
+const ISLAND_SPRING_POSITION_EPSILON: f32 = 0.05;
+const ISLAND_SPRING_VELOCITY_EPSILON: f32 = 1.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct IslandSpring {
+    pub(crate) position: f32,
+    pub(crate) velocity: f32,
+    pub target: f32,
+    pub stiffness: f32,
+}
+
+impl IslandSpring {
+    pub(crate) const fn new(position: f32, target: f32) -> Self {
+        Self {
+            position,
+            velocity: 0.0,
+            target,
+            stiffness: ISLAND_SPRING_STIFFNESS,
+        }
+    }
+
+    pub(crate) fn retarget(&mut self, target: f32) {
+        self.target = target;
+    }
+
+    pub(crate) fn step(&mut self, dt: f32) {
+        let dt = dt / ISLAND_SPRING_SUBSTEPS as f32;
+        let damping = 2.0 * ISLAND_SPRING_DAMPING_RATIO * self.stiffness.sqrt();
+        for _ in 0..ISLAND_SPRING_SUBSTEPS {
+            let acceleration =
+                -self.stiffness * (self.position - self.target) - damping * self.velocity;
+            self.velocity += acceleration * dt;
+            self.position += self.velocity * dt;
+        }
+    }
+
+    pub(crate) fn is_settled(self) -> bool {
+        (self.position - self.target).abs() <= ISLAND_SPRING_POSITION_EPSILON
+            && self.velocity.abs() <= ISLAND_SPRING_VELOCITY_EPSILON
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct IslandAnim {
+    pub(crate) from_tab: usize,
+    pub(crate) to_tab: usize,
+    /// Display mode the endpoints were computed in when the animation
+    /// started. A mid-flight geometry change to a different mode (e.g. a
+    /// resize forcing the labels-to-dots fallback) cuts the animated overlay
+    /// instead of flipping modes on screen.
+    pub(crate) display: crate::config::IslandDisplayConfig,
+    /// First tab index and marker count of the page the animation started on.
+    /// A resize that changes the page plan mid-flight (markers leaving the
+    /// page, the indicator appearing) cuts the animated overlay instead of
+    /// jumping the capsule.
+    pub(crate) page_start: usize,
+    pub(crate) page_len: usize,
+    pub(crate) outgoing_width: IslandSpring,
+    pub(crate) incoming_width: IslandSpring,
+    pub(crate) capsule_total: IslandSpring,
+}
+
+impl IslandAnim {
+    pub(crate) fn is_settled(self) -> bool {
+        self.outgoing_width.is_settled()
+            && self.incoming_width.is_settled()
+            && self.capsule_total.is_settled()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Menu list state (shared by island panel and other selection lists)
+// ---------------------------------------------------------------------------
+
+pub struct MenuListState {
+    pub highlighted: usize,
+}
+
+impl MenuListState {
+    pub fn new(highlighted: usize) -> Self {
+        Self { highlighted }
+    }
+
+    pub fn move_prev(&mut self) {
+        self.highlighted = self.highlighted.saturating_sub(1);
+    }
+
+    pub fn move_next(&mut self, item_count: usize) {
+        if item_count > 0 {
+            self.highlighted = (self.highlighted + 1).min(item_count - 1);
+        }
+    }
+}
+
 /// All application state — pure data, no channels or async runtime.
 /// Testable without PTYs or a tokio runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -817,6 +950,11 @@ pub struct AppState {
     pub config_diagnostic: Option<String>,
     pub toast: Option<ToastNotification>,
     pub pending_agent_notifications: std::collections::HashMap<PaneId, PendingAgentNotification>,
+    pub(crate) island_records: std::collections::VecDeque<IslandRecord>,
+    pub(crate) island_panel_open: bool,
+    pub(crate) island_panel_list: MenuListState,
+    pub(crate) next_island_record_id: u64,
+    pub island_anim: Option<IslandAnim>,
     /// Last reported focus state for the outer terminal hosting herdr.
     /// None means unsupported or not yet reported, which preserves active-pane suppression.
     pub outer_terminal_focus: Option<bool>,
@@ -891,29 +1029,9 @@ pub struct AppState {
     pub session_dirty: bool,
     /// Monotonic signal consumed by the coalesced native title-sync worker.
     pub(crate) title_sync_generation: u64,
-    pub(crate) island_records: std::collections::VecDeque<IslandRecord>,
     /// Terminal runtimes that should be shut down by the app/runtime layer
     /// after state has detached their terminal metadata.
     pub(crate) terminal_runtime_shutdowns: Vec<crate::terminal::TerminalId>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct IslandRecord {
-    pub(crate) id: u64,
-    pub(crate) workspace_id: String,
-    pub(crate) tab_id: String,
-    pub(crate) pane_id: PaneId,
-    pub(crate) agent: Option<crate::detect::Agent>,
-    pub(crate) reason: IslandReason,
-    pub(crate) text: String,
-    pub(crate) at: std::time::SystemTime,
-    pub(crate) read: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum IslandReason {
-    Bell,
-    AgentDone,
 }
 
 impl AppState {
@@ -1075,6 +1193,11 @@ impl AppState {
             config_diagnostic: None,
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
+            island_records: std::collections::VecDeque::new(),
+            island_panel_open: false,
+            island_panel_list: MenuListState::new(0),
+            next_island_record_id: 0,
+            island_anim: None,
             outer_terminal_focus: None,
             prefix_code: KeyCode::Char('b'),
             prefix_mods: KeyModifiers::CONTROL,
@@ -1138,7 +1261,6 @@ impl AppState {
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             session_dirty: false,
             title_sync_generation: 0,
-            island_records: std::collections::VecDeque::new(),
             terminal_runtime_shutdowns: Vec::new(),
         }
     }

@@ -177,4 +177,7 @@ pub enum AppEvent {
     WorktreeAddFinished(Box<WorktreeAddResult>),
     /// Background `git worktree remove` completed.
     WorktreeRemoveFinished(Box<WorktreeRemoveResult>),
+    /// Prefix input-source synchronization event used by the island panel
+    /// and the monolithic client path.
+    PrefixInputSource { active: bool },
 }
